@@ -1593,11 +1593,17 @@ static void session_render_prompt(session_ctx_t *ctx, bool include_separator)
     }
 }
 
-/* erase_line: the cursor still sits after the old input on the same row
- * (Tab completion, history recall), so wipe that row before re-printing
- * instead of appending the new text after the old. */
+/* erase_line kept for call-site readability; the row is always wiped
+ * first.  The cursor position is not trustworthy at this point: deduped
+ * lines emit no bytes, LF-only line endings leave the column unchanged,
+ * and the realtime/incremental redraw relocates the cursor, so any of
+ * those can leave the cursor mid-row.  Appending the input buffer to a
+ * mid-row cursor reproduces the input text ("Hel" + "Hello" -> "HelHello");
+ * returning to column 1 and clearing the row first makes the redraw
+ * correct regardless of how the terminal got here. */
 static void session_redraw_input_line(session_ctx_t *ctx, bool erase_line)
 {
+    (void)erase_line;
     if (ctx == nullptr || !session_transport_active(ctx)) {
         return;
     }
@@ -1609,7 +1615,7 @@ static void session_redraw_input_line(session_ctx_t *ctx, bool erase_line)
     // user can see what they were typing after an interleaving broadcast.
     if (ctx->input_mode == SESSION_INPUT_MODE_CHAT ||
         ctx->input_mode == SESSION_INPUT_MODE_COMMAND) {
-        if (erase_line && !ctx->bbs_post_pending) {
+        if (!ctx->bbs_post_pending) {
             const char clear_sequence[] = "\r" ANSI_CLEAR_LINE;
             session_channel_write(ctx, clear_sequence,
                                   sizeof(clear_sequence) - 1U);
