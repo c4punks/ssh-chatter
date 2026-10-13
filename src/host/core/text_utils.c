@@ -1,3 +1,13 @@
+/*
+ * Text helpers shared by the help system, the captcha and input matching.
+ * This file is #included into core.c rather than compiled alone.
+ */
+
+/*
+ * Terminal column width of a UTF-8 string (CJK characters count as two).
+ * Invalid bytes and characters wcwidth() rejects count as one column, so
+ * the result is always a usable layout estimate.
+ */
 static int session_utf8_display_width(const char *text)
 {
     if (text == nullptr) {
@@ -13,6 +23,7 @@ static int session_utf8_display_width(const char *text)
     while (remaining > 0U) {
         wchar_t wc;
         size_t consumed = mbrtowc(&wc, cursor, remaining, &state);
+        /* Invalid or truncated sequence: skip one byte and resync. */
         if (consumed == (size_t)-1 || consumed == (size_t)-2) {
             ++cursor;
             --remaining;
@@ -37,6 +48,12 @@ static int session_utf8_display_width(const char *text)
 }
 
 
+/*
+ * Minimal printf-like formatter for localized strings: each "%s" consumes
+ * the next entry of args (missing or nullptr entries expand to ""), "%%"
+ * yields '%', everything else is copied. Output is always terminated and
+ * silently truncated to fit buffer.
+ */
 static void session_format_template(const char *format, const char *const *args,
                                     size_t arg_count, char *buffer,
                                     size_t length)
@@ -80,6 +97,12 @@ static void session_format_template(const char *format, const char *const *args,
     buffer[out_index] = '\0';
 }
 
+/*
+ * Resolve the placeholder values a help template needs (command prefix,
+ * editor terminators, localized command names) in the order given by kinds.
+ * With no kinds, the command prefix is supplied for up to 8 "%s" slots,
+ * which covers templates that only reference the prefix.
+ */
 static size_t session_help_collect_arguments(
     session_ctx_t *ctx, const session_help_template_arg_kind_t *kinds,
     size_t kind_count, const char **output, size_t capacity)
@@ -152,6 +175,12 @@ static size_t session_help_collect_arguments(
     return produced;
 }
 
+/*
+ * Format one help row as "<label><padding>- <description>". The label is
+ * localized when a translation exists, and padding is computed from the
+ * label's display width so columns line up even with wide characters.
+ * TEXT entries are emitted as the bare description.
+ */
 static void session_format_help_line(session_ctx_t *ctx,
                                      const session_help_entry_t *entry,
                                      const char *description, char *buffer,
@@ -215,6 +244,11 @@ static void session_format_help_line(session_ctx_t *ctx,
              description != nullptr ? description : "");
 }
 
+/*
+ * Render a help table into buffer, one '\n'-terminated line per entry.
+ * Entries with no description in the session's language are skipped, and
+ * rendering stops at the first line that would not fit.
+ */
 static void session_format_help_entries_to_buffer(
     session_ctx_t *ctx, const session_help_entry_t *entries, size_t count,
     char *buffer, size_t buffer_length)
@@ -267,10 +301,12 @@ static void session_format_help_entries_to_buffer(
     buffer[current_offset] = '\0';
 }
 
+/* Platforms without MSG_DONTWAIT fall back to blocking flags. */
 #ifndef MSG_DONTWAIT
 #define MSG_DONTWAIT 0
 #endif
 
+/* A captcha question in each supported language plus its answer. */
 typedef struct {
     char question_en[256];
     char question_ko[256];
@@ -279,6 +315,7 @@ typedef struct {
     char answer[64];
 } captcha_prompt_t;
 
+/* Languages the captcha question can be shown in. */
 typedef enum {
     CAPTCHA_LANGUAGE_KO = 0,
     CAPTCHA_LANGUAGE_EN,
@@ -287,12 +324,14 @@ typedef enum {
     CAPTCHA_LANGUAGE_COUNT,
 } captcha_language_t;
 
+/* Outcome of the moderation scan of user content (ERROR = scan unavailable). */
 typedef enum {
     HOST_SECURITY_SCAN_CLEAN = 0,
     HOST_SECURITY_SCAN_BLOCKED,
     HOST_SECURITY_SCAN_ERROR,
 } host_security_scan_result_t;
 
+/* Numerical Recipes LCG step; fine for puzzles, not for security. */
 static unsigned session_prng_next(unsigned *state)
 {
     if (state == nullptr) {
@@ -303,6 +342,11 @@ static unsigned session_prng_next(unsigned *state)
     return *state;
 }
 
+/*
+ * Fill prompt with a "sum these digits" question. Two digits are drawn from
+ * 1..9; three digits are drawn from 0..9 and re-rolled (then trimmed) so
+ * the sum stays a single digit. A nullptr state gives a fixed puzzle.
+ */
 static void session_fill_digit_sum_prompt(captcha_prompt_t *prompt,
                                           unsigned *state)
 {
@@ -341,6 +385,7 @@ static void session_fill_digit_sum_prompt(captcha_prompt_t *prompt,
             }
         }
 
+        /* Re-rolls failed: shave the excess off the last digits. */
         if (!valid && sum >= 10U) {
             unsigned overflow = sum - 9U;
             for (int idx = (int)digits_count - 1; idx >= 0 && overflow > 0U;
@@ -409,6 +454,7 @@ static void session_fill_digit_sum_prompt(captcha_prompt_t *prompt,
     snprintf(prompt->answer, sizeof(prompt->answer), "%u", sum);
 }
 
+/* Case-insensitive (ASCII) substring search. */
 static bool string_contains_case_insensitive(const char *haystack,
                                              const char *needle)
 {
@@ -440,6 +486,7 @@ static bool string_contains_case_insensitive(const char *haystack,
     return false;
 }
 
+/* Whether line ends the editor currently open in this session. */
 static bool session_editor_matches_terminator(const session_ctx_t *ctx,
                                               const char *line)
 {
@@ -454,6 +501,10 @@ static bool session_editor_matches_terminator(const session_ctx_t *ctx,
     return session_bbs_matches_terminator(line);
 }
 
+/*
+ * Like string_contains_case_insensitive(), but the match must be a whole
+ * word: the characters around it may not be alphanumeric or '_'.
+ */
 static bool string_contains_token_case_insensitive(const char *haystack,
                                                    const char *needle)
 {
@@ -499,6 +550,10 @@ static bool string_contains_token_case_insensitive(const char *haystack,
     return false;
 }
 
+/*
+ * Copy the first whitespace-delimited word of banner into buffer, or the
+ * (truncated) banner itself when it has no such word.
+ */
 static void session_extract_banner_token(const char *banner, char *buffer,
                                          size_t length)
 {

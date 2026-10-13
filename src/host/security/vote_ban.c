@@ -1,3 +1,21 @@
+/*
+ * Load-side persistence for polls, bans, replies and eliza memory.
+ *
+ * Every state file uses the same shape: a header with a magic number,
+ * a format version and an entry count, followed by fixed-size records.
+ * Loaders reject foreign magic numbers and versions newer than this build.
+ * The ban, reply and eliza loaders read every record into scratch memory
+ * before replacing in-memory state under host->lock; the poll loader reads
+ * under the lock and resets all polls if the file turns out truncated.
+ *
+ * This file starts in the middle of host_vote_state_load(): its signature
+ * is the last line of rss_backend.c (both are #included in sequence by
+ * security_moderation.c).
+ *
+ * host_vote_state_load(): restore the anonymous /poll and the named
+ * /vote polls. On a short read every poll is reset rather than kept
+ * partially restored.
+ */
 {
     if (host == nullptr) {
         return;
@@ -28,6 +46,7 @@
         return;
     }
 
+    /* Polls are read straight into host state, so hold the lock throughout. */
     ttak_mutex_lock(&host->lock);
 
     poll_state_reset(&host->poll);
@@ -38,6 +57,7 @@
 
     bool success = true;
 
+    /* The main (anonymous) poll always comes first. */
     vote_state_poll_entry_t main_entry = {0};
     if (fread(&main_entry, sizeof(main_entry), 1U, fp) != 1U) {
         success = false;
@@ -52,6 +72,7 @@
             break;
         }
 
+        /* Keep consuming records past our capacity so the read stays aligned. */
         if (idx >= SSH_CHATTER_MAX_NAMED_POLLS) {
             continue;
         }
@@ -73,6 +94,7 @@
         }
     }
 
+    /* Derive named_poll_count from the restored slots. */
     if (success) {
         host_recount_named_polls_locked(host);
     } else {
@@ -87,6 +109,11 @@
     fclose(fp);
 }
 
+/*
+ * Restore the operator ban list. Entries that would ban a protected IP
+ * (directly, or via a CIDR range covering one) are dropped on load so a
+ * stale or edited file cannot lock out protected addresses.
+ */
 static void host_ban_state_load(host_t *host)
 {
     if (host == nullptr) {
@@ -161,6 +188,7 @@ static void host_ban_state_load(host_t *host)
             host_is_protected_ip_unlocked(host, entries[idx].ip)) {
             continue;
         }
+        /* CIDR bans: skip any range that contains a protected IP. */
         if (entries[idx].ip[0] != '\0' &&
             strchr(entries[idx].ip, '/') != nullptr) {
             bool intersects_protected = false;
@@ -189,6 +217,11 @@ static void host_ban_state_load(host_t *host)
     sshc_gc_free(entries);
 }
 
+/*
+ * Restore /reply threads. Entries beyond SSH_CHATTER_MAX_REPLIES are not
+ * kept but still count toward the highest seen id, so next_reply_id never
+ * reuses an id that was handed out before the restart.
+ */
 static void host_reply_state_load(host_t *host)
 {
     if (host == nullptr) {
@@ -267,6 +300,7 @@ static void host_reply_state_load(host_t *host)
         chat_reply_entry_t *slot = &host->replies[host->reply_count];
         memset(slot, 0, sizeof(*slot));
         slot->in_use = true;
+        /* Older files may have id 0; synthesize a sequential id. */
         slot->reply_id = entries[idx].reply_id != 0U
                              ? entries[idx].reply_id
                              : (uint64_t)(host->reply_count + 1U);
@@ -283,6 +317,7 @@ static void host_reply_state_load(host_t *host)
         ++host->reply_count;
     }
 
+    /* next id must be past every id seen; saturate instead of wrapping. */
     if (host->next_reply_id <= max_reply_id) {
         if (max_reply_id == UINT64_MAX) {
             host->next_reply_id = UINT64_MAX;
@@ -298,6 +333,10 @@ static void host_reply_state_load(host_t *host)
     ttak_mutex_unlock(&host->lock);
 }
 
+/*
+ * Pick the eliza memory file: $CHATTER_ELIZA_MEMORY_FILE or
+ * "eliza_memory.dat". An over-long path disables persistence.
+ */
 static void host_eliza_memory_resolve_path(host_t *host)
 {
     if (host == nullptr) {
@@ -320,6 +359,11 @@ static void host_eliza_memory_resolve_path(host_t *host)
     }
 }
 
+/*
+ * Persist eliza's remembered prompt/reply pairs via temp file + fsync +
+ * rename, then restrict the file to the owner (0600). Caller holds
+ * host->lock.
+ */
 static void host_eliza_memory_save_locked(host_t *host)
 {
     if (host == nullptr || host->eliza_memory_file_path[0] == '\0') {
@@ -366,6 +410,7 @@ static void host_eliza_memory_save_locked(host_t *host)
 
     for (size_t idx = 0U; success && idx < stored; ++idx) {
         const eliza_memory_entry_t *entry = &host->eliza_memory[idx];
+        /* Convert to the fixed-width on-disk record. */
         eliza_memory_entry_serialized_t serialized = {0};
         serialized.id = entry->id;
         serialized.stored_at = (int64_t)entry->stored_at;
@@ -427,6 +472,10 @@ static void host_eliza_memory_save_locked(host_t *host)
     }
 }
 
+/*
+ * Load eliza memory saved by host_eliza_memory_save_locked(). Like the
+ * reply loader, ids of entries that do not fit still advance next_id.
+ */
 static void host_eliza_memory_load(host_t *host)
 {
     if (host == nullptr) {

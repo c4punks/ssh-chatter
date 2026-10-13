@@ -1,3 +1,13 @@
+/*
+ * /mail (offline mailbox) and the message reaction commands.
+ * This file is #included into session_commands.c rather than compiled alone.
+ */
+
+/*
+ * Print the caller's mailbox, oldest first, one line per message with a
+ * local timestamp. Messages are reloaded from user data so mail delivered
+ * while the session was open is included.
+ */
 static void session_mail_render_inbox(session_ctx_t *ctx)
 {
     if (ctx == nullptr) {
@@ -37,6 +47,7 @@ static void session_mail_render_inbox(session_ctx_t *ctx)
             snprintf(stamp_text, sizeof(stamp_text), "%s", "(time unknown)");
         }
 
+        /* Flatten control characters and newlines so each mail is one line. */
         char body[USER_DATA_MAILBOX_MESSAGE_LEN];
         snprintf(body, sizeof(body), "%s", entry->message);
         for (size_t pos = 0U; body[pos] != '\0'; ++pos) {
@@ -107,6 +118,14 @@ static void session_mail_send_usage(session_ctx_t *ctx, bool send_form)
     session_send_system_line(ctx, usage);
 }
 
+/*
+ * /mail [inbox] | clear | [send] <user[@ip]>|<message>
+ *
+ * With no subcommand the inbox is shown. "send" is optional: any other first
+ * word is treated as the recipient. The optional @ip suffix selects a
+ * specific IP variant of an unregistered name. Mail to DDial users is
+ * relayed by host_mail_send(), which reports that through to_ddial.
+ */
 static void session_handle_mail(session_ctx_t *ctx, const char *arguments)
 {
     if (ctx == nullptr || ctx->owner == nullptr) {
@@ -129,6 +148,7 @@ static void session_handle_mail(session_ctx_t *ctx, const char *arguments)
         return;
     }
 
+    /* clear: wipe the mailbox and persist immediately. */
     if (strcasecmp(command, "clear") == 0) {
         if (!session_user_data_load(ctx)) {
             session_send_system_line(
@@ -193,6 +213,7 @@ static void session_handle_mail(session_ctx_t *ctx, const char *arguments)
         return;
     }
 
+    /* Split "name@ip" into recipient name and optional IP. */
     char target[SSH_CHATTER_USERNAME_LEN];
     char target_ip[SSH_CHATTER_IP_LEN];
     target_ip[0] = '\0';
@@ -265,6 +286,7 @@ static void session_handle_mail(session_ctx_t *ctx, const char *arguments)
             return;
         }
 
+        /* Mailing yourself: refresh the cached record so the inbox shows it. */
         if (strcasecmp(target, ctx->user.name) == 0) {
             (void)session_user_data_load(ctx);
         }
@@ -275,6 +297,12 @@ static void session_handle_mail(session_ctx_t *ctx, const char *arguments)
         session_send_system_line(ctx, confirmation);
 }
 
+/*
+ * /good, /sad, /cool, /angry, /checked, /love, /wtf <message-id>: add a
+ * reaction to a chat message. reaction_index selects the entry in
+ * REACTION_DEFINITIONS; ids are the compact encoded form shown in chat.
+ * On success every client gets the updated reaction counts.
+ */
 static void session_handle_reaction(session_ctx_t *ctx, size_t reaction_index,
                                     const char *arguments)
 {

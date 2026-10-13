@@ -1476,4 +1476,8 @@ static void host_rss_start_backend(host_t *host)
     host->rss_thread_initialized = true;
 }
 
+/*
+ * NOTE: the body of host_vote_state_load() continues in vote_ban.c, which
+ * security_moderation.c #includes right after this file.
+ */
 static void host_vote_state_load(host_t *host)

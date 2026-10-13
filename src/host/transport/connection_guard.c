@@ -1,12 +1,29 @@
 
+/*
+ * Connection flood guard, MOTD hot-reload and captcha prompt generation.
+ *
+ * The guard keeps one entry per client IP. Each IP may make up to
+ * SSH_CHATTER_CONNECTION_GUARD_THRESHOLD connection attempts per
+ * SSH_CHATTER_CONNECTION_GUARD_WINDOW_NS; crossing it blocks the IP for a
+ * penalty that grows by BLOCK_STEP with each repeated block (capped at
+ * BLOCK_MAX). After BAN_THRESHOLD blocks the caller is told to escalate to
+ * a real ban. Entries idle longer than the retention period are pruned.
+ * All guard state lives on host_t and is protected by host->lock.
+ */
+
+/* Verdict for one connection attempt. */
 typedef struct connection_guard_result {
-    bool blocked;
-    bool escalate_ban;
-    struct timespec blocked_until;
-    size_t attempt_count;
-    unsigned int block_count;
+    bool blocked;                  /* Reject this connection */
+    bool escalate_ban;             /* Repeat offender; caller should ban */
+    struct timespec blocked_until; /* CLOCK_MONOTONIC end of the block */
+    size_t attempt_count;          /* Attempts counted in the current window */
+    unsigned int block_count;      /* Blocks issued to this IP so far */
 } connection_guard_result_t;
 
+/*
+ * Drop entries not seen within the retention period and compact the array
+ * in place, zeroing the freed tail. Caller holds host->lock.
+ */
 static void host_connection_guard_prune_locked(host_t *host,
                                                const struct timespec *now)
 {
@@ -45,6 +62,7 @@ static void host_connection_guard_prune_locked(host_t *host,
     host->connection_guard_count = write_idx;
 }
 
+/* Linear lookup of an IP's entry. Caller holds host->lock. */
 static connection_guard_entry_t *
 host_find_connection_guard_locked(host_t *host, const char *ip)
 {
@@ -62,6 +80,11 @@ host_find_connection_guard_locked(host_t *host, const char *ip)
     return nullptr;
 }
 
+/*
+ * Find or append the entry for ip, doubling the array (starting at 16)
+ * when full. Allocations are charged to the host's memory scope.
+ * Caller holds host->lock.
+ */
 static connection_guard_entry_t *
 host_ensure_connection_guard_locked(host_t *host, const char *ip)
 {
@@ -103,6 +126,10 @@ host_ensure_connection_guard_locked(host_t *host, const char *ip)
     return entry;
 }
 
+/*
+ * Record a connection attempt from ip and decide whether to allow it.
+ * Uses CLOCK_MONOTONIC so wall-clock changes cannot lift a block early.
+ */
 static connection_guard_result_t host_connection_guard_register(host_t *host,
                                                                 const char *ip)
 {
@@ -125,6 +152,7 @@ static connection_guard_result_t host_connection_guard_register(host_t *host,
 
     entry->last_seen = now;
 
+    /* Still serving a block: refuse without counting the attempt. */
     if (entry->blocked_until.tv_sec != 0 || entry->blocked_until.tv_nsec != 0) {
         if (timespec_compare(&entry->blocked_until, &now) > 0) {
             result.blocked = true;
@@ -138,6 +166,10 @@ static connection_guard_result_t host_connection_guard_register(host_t *host,
         entry->blocked_until.tv_nsec = 0L;
     }
 
+    /*
+     * Start a new counting window when none is open or the old one expired.
+     * A long quiet period also forgives earlier blocks.
+     */
     if (entry->window_start.tv_sec == 0 && entry->window_start.tv_nsec == 0) {
         entry->window_start = now;
         entry->attempts = 0U;
@@ -159,6 +191,7 @@ static connection_guard_result_t host_connection_guard_register(host_t *host,
     result.attempt_count = entry->attempts;
     result.block_count = entry->block_count;
 
+    /* Threshold hit: block with a penalty that grows per repeat offense. */
     if (entry->attempts >= SSH_CHATTER_CONNECTION_GUARD_THRESHOLD) {
         size_t attempt_snapshot = entry->attempts;
         if (entry->block_count < UINT_MAX) {
@@ -189,6 +222,7 @@ static connection_guard_result_t host_connection_guard_register(host_t *host,
     return result;
 }
 
+/* Reset the host health guard's error streak after a successful operation. */
 static void host_error_guard_register_success(host_t *host)
 {
     if (host == nullptr) {
@@ -202,6 +236,7 @@ static void host_error_guard_register_success(host_t *host)
 
 static bool host_try_load_motd_from_path(host_t *host, const char *path);
 
+/* Portable nanosecond-precision mtime from a struct stat. */
 static struct timespec host_stat_mtime(const struct stat *info)
 {
     struct timespec result = {0, 0};
@@ -229,12 +264,19 @@ static struct timespec host_stat_mtime(const struct stat *info)
     return result;
 }
 
+/*
+ * Reload the MOTD when its file changed on disk (mtime differs from the
+ * last load). A leading "~" is expanded with $HOME. If the file vanished
+ * the host stops treating the MOTD as file-backed; if it never existed,
+ * loading is retried.
+ */
 static void host_maybe_reload_motd_from_file(host_t *host)
 {
     if (host == nullptr) {
         return;
     }
 
+    /* Snapshot the path under the lock; do file I/O without holding it. */
     char stored_path[PATH_MAX];
     stored_path[0] = '\0';
     struct timespec last_loaded = {0, 0};
@@ -298,6 +340,7 @@ static void host_maybe_reload_motd_from_file(host_t *host)
     (void)host_try_load_motd_from_path(host, path_to_try);
 }
 
+/* djb2-style (xor variant) string hash; not cryptographic. */
 static unsigned session_simple_hash(const char *text)
 {
     unsigned hash = 5381U;
@@ -312,6 +355,12 @@ static unsigned session_simple_hash(const char *text)
     return hash;
 }
 
+/*
+ * Build a digit-sum captcha for a connecting session. The PRNG seed mixes
+ * the user name, client IP, current time and a per-host nonce so that two
+ * clients connecting at the same instant still get different puzzles. This
+ * only needs to deter scripts, not resist a determined attacker.
+ */
 static void session_build_captcha_prompt(session_ctx_t *ctx,
                                          captcha_prompt_t *prompt)
 {
@@ -350,7 +399,7 @@ static void session_build_captcha_prompt(session_ctx_t *ctx,
     basis ^= entropy;
 
     const unsigned variant_seed = basis ^ (basis >> 16U) ^ (entropy << 1U);
-    unsigned prng_state = variant_seed | 1U;
+    unsigned prng_state = variant_seed | 1U; /* Keep the PRNG state non-zero */
 
     session_fill_digit_sum_prompt(prompt, &prng_state);
 }

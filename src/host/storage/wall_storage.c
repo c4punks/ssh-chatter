@@ -1,13 +1,28 @@
+/*
+ * Persistence for the shared /wall canvas.
+ *
+ * File layout: a wall_state_header_t followed by the raw
+ * SSH_CHATTER_WALL_HEIGHT x SSH_CHATTER_WALL_WIDTH ascii_pixel_t grid.
+ * The header's width/height guard against loading a file written with
+ * different compile-time wall dimensions.
+ *
+ * This file is #included into eliza_storage.c rather than compiled alone.
+ */
+
 typedef struct wall_state_header {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t width;
-    uint32_t height;
+    uint32_t magic;   /* WALL_STATE_MAGIC */
+    uint32_t version; /* WALL_STATE_VERSION at write time */
+    uint32_t width;   /* Must equal SSH_CHATTER_WALL_WIDTH on load */
+    uint32_t height;  /* Must equal SSH_CHATTER_WALL_HEIGHT on load */
 } wall_state_header_t;
 
-#define WALL_STATE_MAGIC 0x57414c4cU
+#define WALL_STATE_MAGIC 0x57414c4cU /* "WALL" */
 #define WALL_STATE_VERSION 1U
 
+/*
+ * Pick the wall state file: $CHATTER_WALL_FILE, or "wall_state.dat" in the
+ * working directory. An over-long path disables persistence (empty path).
+ */
 static void host_wall_resolve_path(host_t *host)
 {
     if (host == nullptr) {
@@ -29,6 +44,10 @@ static void host_wall_resolve_path(host_t *host)
     }
 }
 
+/*
+ * Allocate the wall on first use and clear every cell to a blank, default-
+ * colored pixel. Caller holds host->lock (or runs before sessions exist).
+ */
 static void host_wall_reset_locked(host_t *host)
 {
     if (host == nullptr) {
@@ -52,6 +71,11 @@ static void host_wall_reset_locked(host_t *host)
     }
 }
 
+/*
+ * Write the wall to disk atomically: write a private (0600) temp file,
+ * fsync it, then rename() it over the real file so a crash never leaves a
+ * half-written state file behind. Caller holds host->lock.
+ */
 static void host_wall_state_save_locked(host_t *host)
 {
     if (host == nullptr || host->wall_state_file_path[0] == '\0') {
@@ -98,8 +122,17 @@ static void host_wall_state_save_locked(host_t *host)
 
     bool success = fwrite(&header, sizeof(header), 1U, fp) == 1U;
     if (success) {
+        /*
+         * FIXME: host->wall is a pointer, so sizeof(host->wall) is the pointer
+         * size, not the grid size. Only a few bytes of pixel data are written
+         * and host_wall_state_load() then fails its full-grid fread(), so the
+         * wall is not actually restored across restarts. The intended size is
+         * SSH_CHATTER_WALL_HEIGHT * SSH_CHATTER_WALL_WIDTH *
+         * sizeof(ascii_pixel_t).
+         */
         success = fwrite(host->wall, sizeof(host->wall), 1U, fp) == 1U;
     }
+    /* Flush stdio and the kernel page cache before the rename. */
     if (success && fflush(fp) != 0) {
         success = false;
     }
@@ -128,6 +161,7 @@ static void host_wall_state_save_locked(host_t *host)
         return;
     }
 
+    /* rename() is atomic on the same filesystem. */
     if (rename(temp_path, host->wall_state_file_path) != 0) {
         humanized_log_error("wall", "failed to update wall state file", errno);
         unlink(temp_path);
@@ -137,6 +171,10 @@ static void host_wall_state_save_locked(host_t *host)
     }
 }
 
+/*
+ * Load the wall from disk. The wall is cleared first, so any failure
+ * (missing file, bad header, short read) simply leaves a blank wall.
+ */
 static void host_wall_state_load(host_t *host)
 {
     if (host == nullptr || host->wall_state_file_path[0] == '\0') {
@@ -161,6 +199,7 @@ static void host_wall_state_load(host_t *host)
         return;
     }
 
+    /* Reject foreign files, future versions and mismatched dimensions. */
     if (header.magic != WALL_STATE_MAGIC || header.version == 0U ||
         header.version > WALL_STATE_VERSION ||
         header.width != SSH_CHATTER_WALL_WIDTH ||
@@ -169,6 +208,7 @@ static void host_wall_state_load(host_t *host)
         return;
     }
 
+    /* Read into a scratch grid so a short read cannot corrupt the live wall. */
     ascii_pixel_t loaded[SSH_CHATTER_WALL_HEIGHT][SSH_CHATTER_WALL_WIDTH];
     if (fread(loaded, sizeof(loaded), 1U, fp) != 1U) {
         fclose(fp);
@@ -176,6 +216,10 @@ static void host_wall_state_load(host_t *host)
     }
     fclose(fp);
 
+    /*
+     * Sanitize untrusted file contents: printable ASCII only, terminated
+     * color names, and no negative timestamps.
+     */
     for (size_t y = 0U; y < SSH_CHATTER_WALL_HEIGHT; ++y) {
         for (size_t x = 0U; x < SSH_CHATTER_WALL_WIDTH; ++x) {
             ascii_pixel_t *pixel = &loaded[y][x];

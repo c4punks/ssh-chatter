@@ -1,3 +1,9 @@
+/**
+ * @file abstract_byte_buffer.h
+ * @desc Growable, always NUL-terminated byte buffer backed by libttak
+ *       abstract memory. The storage is not held as a raw pointer: reads and
+ *       writes go through short-lived map/unmap windows (or copy helpers).
+ */
 #ifndef SSH_CHATTER_ABSTRACT_BYTE_BUFFER_H
 #define SSH_CHATTER_ABSTRACT_BYTE_BUFFER_H
 
@@ -9,16 +15,18 @@
 #include <ttak/mem/abstract.h>
 
 typedef struct sshc_abstract_byte_buffer {
-    ttak_abstract_mem_t *storage;
-    size_t length;
-    size_t capacity;
+    ttak_abstract_mem_t *storage; /* nullptr until the first append */
+    size_t length;   /* Bytes stored, excluding the trailing NUL */
+    size_t capacity; /* Bytes allocated in storage */
 } sshc_abstract_byte_buffer_t;
 
+/* Read-only mapping of a buffer's contents as a C string. */
 typedef struct sshc_abstract_byte_buffer_view {
     ttak_abstract_map_t map;
     char *data;
 } sshc_abstract_byte_buffer_view_t;
 
+/* Reset buffer to empty without allocating. */
 static inline void
 sshc_abstract_byte_buffer_init(sshc_abstract_byte_buffer_t *buffer)
 {
@@ -30,6 +38,7 @@ sshc_abstract_byte_buffer_init(sshc_abstract_byte_buffer_t *buffer)
     buffer->capacity = 0U;
 }
 
+/* Release storage and return buffer to the empty state. */
 static inline void
 sshc_abstract_byte_buffer_free(sshc_abstract_byte_buffer_t *buffer)
 {
@@ -42,6 +51,10 @@ sshc_abstract_byte_buffer_free(sshc_abstract_byte_buffer_t *buffer)
     buffer->capacity = 0U;
 }
 
+/*
+ * Ensure capacity for at least total_bytes. Capacity starts at 256 and
+ * doubles; returns false on overflow or allocation failure.
+ */
 static inline bool
 sshc_abstract_byte_buffer_reserve_total(sshc_abstract_byte_buffer_t *buffer,
                                         size_t total_bytes)
@@ -61,6 +74,7 @@ sshc_abstract_byte_buffer_reserve_total(sshc_abstract_byte_buffer_t *buffer,
         new_cap *= 2U;
     }
 
+    /* First use allocates; later growth resizes in place. */
     if (buffer->storage == NULL) {
         buffer->storage = ttak_abstract_alloc(new_cap);
         if (buffer->storage == NULL) {
@@ -74,6 +88,7 @@ sshc_abstract_byte_buffer_reserve_total(sshc_abstract_byte_buffer_t *buffer,
     return true;
 }
 
+/* Append length bytes from data and keep the contents NUL-terminated. */
 static inline bool
 sshc_abstract_byte_buffer_append(sshc_abstract_byte_buffer_t *buffer,
                                  const void *data, size_t length)
@@ -82,11 +97,12 @@ sshc_abstract_byte_buffer_append(sshc_abstract_byte_buffer_t *buffer,
         return false;
     }
 
-    size_t required = buffer->length + length + 1U;
+    size_t required = buffer->length + length + 1U; /* +1 for the NUL */
     if (!sshc_abstract_byte_buffer_reserve_total(buffer, required)) {
         return false;
     }
 
+    /* Map only the tail being written, including the new terminator. */
     ttak_abstract_map_t map;
     if (ttak_abstract_map(buffer->storage, buffer->length, length + 1U,
                           TTAK_ABSTRACT_ACCESS_WRITE, &map) != 0) {
@@ -102,6 +118,10 @@ sshc_abstract_byte_buffer_append(sshc_abstract_byte_buffer_t *buffer,
     return true;
 }
 
+/*
+ * Map the whole buffer read-only so view->data can be used as a C string.
+ * Every successful call must be paired with sshc_abstract_byte_buffer_unmap().
+ */
 static inline bool sshc_abstract_byte_buffer_map_cstr(
     sshc_abstract_byte_buffer_t *buffer, sshc_abstract_byte_buffer_view_t *view)
 {
@@ -123,6 +143,7 @@ static inline bool sshc_abstract_byte_buffer_map_cstr(
     return true;
 }
 
+/* Release a view obtained from sshc_abstract_byte_buffer_map_cstr(). */
 static inline void sshc_abstract_byte_buffer_unmap(
     sshc_abstract_byte_buffer_view_t *view)
 {
@@ -133,6 +154,7 @@ static inline void sshc_abstract_byte_buffer_unmap(
     view->data = NULL;
 }
 
+/* Copy the first length bytes into out; length may include the NUL. */
 static inline bool sshc_abstract_byte_buffer_copy_out(
     const sshc_abstract_byte_buffer_t *buffer, void *out, size_t length)
 {

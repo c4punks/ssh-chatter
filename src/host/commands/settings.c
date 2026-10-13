@@ -1,3 +1,10 @@
+/*
+ * /gameopt reset: restore per-user game options to their defaults. Right now
+ * that only means resetting the camouflage language (the fake source code
+ * shown when a game is hidden) to C, both for the session and in the
+ * user's saved preferences. Currently not wired to the dispatcher, hence
+ * the unused attribute.
+ */
 static void __attribute__((unused))
 session_handle_gameopt(session_ctx_t *ctx, const char *arguments)
 {
@@ -46,6 +53,12 @@ session_handle_gameopt(session_ctx_t *ctx, const char *arguments)
     session_send_system_line(ctx, usage);
 }
 
+/*
+ * /advanced [topic]: show the extended help list, plus the operator command
+ * list for full operators. LAN operators and regular users are told the
+ * operator section is hidden. "telnet-server" is the only recognized topic
+ * and just points the user at the /telnet-server command.
+ */
 static void session_handle_advanced(session_ctx_t *ctx, const char *arguments)
 {
     if (ctx == nullptr || ctx->owner == nullptr) {
@@ -65,6 +78,7 @@ static void session_handle_advanced(session_ctx_t *ctx, const char *arguments)
             const char *remaining =
                 session_consume_token(delegated_buffer, token, sizeof(token));
             if (strcasecmp(token, "telnet-server") == 0) {
+                /* Remaining arguments are parsed but not forwarded yet. */
                 char forwarded[SSH_CHATTER_MESSAGE_LIMIT];
                 if (remaining != nullptr) {
                     snprintf(forwarded, sizeof(forwarded), "%s", remaining);

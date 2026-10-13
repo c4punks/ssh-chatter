@@ -1,7 +1,22 @@
+/*
+ * /wall: a shared 80x24 ASCII graffiti canvas.
+ *
+ * Outside the editor, "/wall" or "/wall show" prints a static dump. Inside
+ * the editor ("/wall enter") the session switches to a full-screen mode
+ * where arrow keys move a cursor, printable keys paint at the cursor, and a
+ * command mode accepts "exit", "show", "color <name>" and "goto X Y".
+ * Every paint is saved to disk and pushed to all other sessions that have
+ * the editor open.
+ *
+ * This file is #included into session_commands.c rather than compiled alone.
+ */
+
+/* Reverse video, used to show the cursor cell. */
 #ifndef ANSI_REVERSE
 #define ANSI_REVERSE "\033[7m"
 #endif
 
+/* Map a user color name (same set as /color) to its ANSI sequence. */
 static const char *session_wall_lookup_color_code(const char *name)
 {
     if (name == nullptr || name[0] == '\0') {
@@ -13,6 +28,10 @@ static const char *session_wall_lookup_color_code(const char *name)
                              name);
 }
 
+/*
+ * Copy the shared wall under host->lock so rendering can proceed without
+ * holding the lock while writing to the network.
+ */
 static void session_wall_copy_snapshot(host_t *host,
                                        ascii_pixel_t snapshot
                                            [SSH_CHATTER_WALL_HEIGHT]
@@ -29,6 +48,11 @@ static void session_wall_copy_snapshot(host_t *host,
     ttak_mutex_unlock(&host->lock);
 }
 
+/*
+ * Render one wall row into buffer. Each painted cell carries its own color
+ * and reset; the cursor cell (when highlight_cursor is set) is drawn in
+ * reverse video. Rendering stops early if buffer fills up.
+ */
 static void session_wall_render_row(
     const ascii_pixel_t row[SSH_CHATTER_WALL_WIDTH], size_t cursor_x,
     bool highlight_cursor, char *buffer, size_t length)
@@ -43,6 +67,7 @@ static void session_wall_render_row(
     for (size_t x = 0U; x < SSH_CHATTER_WALL_WIDTH; ++x) {
         const ascii_pixel_t *pixel = &row[x];
         unsigned char ch = (unsigned char)pixel->ch;
+        /* Never emit control bytes from stored data. */
         char render = (ch >= 0x20U && ch <= 0x7eU) ? (char)ch : ' ';
         const char *color =
             (render != ' ') ? session_wall_lookup_color_code(pixel->color_name)
@@ -70,6 +95,7 @@ static void session_wall_render_row(
     }
 }
 
+/* Print a static, cursor-less dump of the wall into the chat stream. */
 static void session_wall_show(session_ctx_t *ctx)
 {
     if (ctx == nullptr || ctx->owner == nullptr) {
@@ -87,6 +113,7 @@ static void session_wall_show(session_ctx_t *ctx)
     }
 }
 
+/* Move the editing cursor by (dx, dy), clamped to the wall bounds. */
 static void session_wall_move_cursor(session_ctx_t *ctx, int dx, int dy)
 {
     if (ctx == nullptr) {
@@ -113,6 +140,7 @@ static void session_wall_move_cursor(session_ctx_t *ctx, int dx, int dy)
     ctx->wall_cursor_y = (uint8_t)next_y;
 }
 
+/* Wall-clock time in nanoseconds; used to order concurrent paints. */
 static int64_t session_wall_now_ns(void)
 {
     struct timespec now = {0, 0};
@@ -124,6 +152,10 @@ static int64_t session_wall_now_ns(void)
     return ((int64_t)now.tv_sec * 1000000000LL) + (int64_t)now.tv_nsec;
 }
 
+/*
+ * Redraw the wall for every session currently in the editor. Targets are
+ * collected under the room lock, then rendered after releasing it.
+ */
 static void session_wall_broadcast_refresh(host_t *host,
                                            const session_ctx_t *origin)
 {
@@ -159,6 +191,11 @@ static void session_wall_broadcast_refresh(host_t *host,
     }
 }
 
+/*
+ * Paint ch at the cursor with the session's brush color, persist the wall,
+ * advance the cursor one cell to the right and notify other editors.
+ * Painting a space erases the cell back to the default color.
+ */
 static void session_wall_draw_current(session_ctx_t *ctx, char ch)
 {
     if (ctx == nullptr || ctx->owner == nullptr) {
@@ -175,6 +212,7 @@ static void session_wall_draw_current(session_ctx_t *ctx, char ch)
     ascii_pixel_t *pixel = &ctx->owner->wall[ctx->wall_cursor_y *
                                                      SSH_CHATTER_WALL_WIDTH +
                                                  ctx->wall_cursor_x];
+    /* Last writer wins; ignore a paint older than what is already there. */
     if (updated_at_ns >= pixel->updated_at_ns) {
         pixel->ch = ch;
         if (ch == ' ') {
@@ -197,6 +235,12 @@ static void session_wall_draw_current(session_ctx_t *ctx, char ch)
     session_wall_broadcast_refresh(ctx->owner, ctx);
 }
 
+/*
+ * Full-screen redraw of the editor: header with cursor/brush info, a help
+ * line, the 24 wall rows, and a footer that shows either the command being
+ * typed (command mode) or the given status message. Output is buffered so
+ * the frame reaches the client in one write.
+ */
 void session_wall_render(session_ctx_t *ctx, const char *status)
 {
     if (ctx == nullptr || ctx->owner == nullptr || !ctx->wall_active ||
@@ -210,6 +254,7 @@ void session_wall_render(session_ctx_t *ctx, const char *status)
     bool locked = session_output_lock(ctx);
     session_output_buffer_start(ctx);
 
+    /* Home the cursor and clear the screen. */
     session_channel_write(ctx, "\033[H\033[2J", 7U);
 
     char line[SSH_CHATTER_MESSAGE_LIMIT];
@@ -255,6 +300,7 @@ void session_wall_render(session_ctx_t *ctx, const char *status)
     session_channel_write(ctx, "\r\n", 2U);
 
     session_output_buffer_stop(ctx);
+    /* Flush TELNET sessions explicitly so the frame goes out right away. */
     if (ctx->transport_kind == SESSION_TRANSPORT_TELNET) {
         session_channel_flush(ctx);
     }
@@ -264,6 +310,7 @@ void session_wall_render(session_ctx_t *ctx, const char *status)
     }
 }
 
+/* Leave the editor and return to normal chat, optionally with a message. */
 void session_wall_exit(session_ctx_t *ctx, const char *status)
 {
     if (ctx == nullptr) {
@@ -279,6 +326,10 @@ void session_wall_exit(session_ctx_t *ctx, const char *status)
     }
 }
 
+/*
+ * Execute one command-mode line. An empty line returns to paint mode.
+ * Always returns true: inside the editor every line is consumed here.
+ */
 static bool session_wall_handle_command(session_ctx_t *ctx, const char *line)
 {
     if (ctx == nullptr || line == nullptr) {
@@ -320,6 +371,7 @@ static bool session_wall_handle_command(session_ctx_t *ctx, const char *line)
         return true;
     }
 
+    /* Coordinates are 1-based for the user, 0-based internally. */
     if (strncasecmp(working, "goto ", 5) == 0) {
         unsigned int x = 0U;
         unsigned int y = 0U;
@@ -339,6 +391,11 @@ static bool session_wall_handle_command(session_ctx_t *ctx, const char *line)
     return true;
 }
 
+/*
+ * Input hook for the editor. In paint mode a single printable character is
+ * painted; anything else just redraws. Returns false when the editor is not
+ * active so the caller handles the input normally.
+ */
 bool session_wall_process_line(session_ctx_t *ctx, const char *line,
                                size_t length)
 {
@@ -363,6 +420,10 @@ bool session_wall_process_line(session_ctx_t *ctx, const char *line,
     return true;
 }
 
+/*
+ * Escape-sequence hook for the editor. Arrow keys (CSI or SS3 form) move
+ * the cursor; other sequences are swallowed while the editor is active.
+ */
 bool session_wall_process_escape(session_ctx_t *ctx, const char *sequence,
                                  size_t length)
 {
@@ -407,6 +468,7 @@ bool session_wall_process_escape(session_ctx_t *ctx, const char *sequence,
     return true;
 }
 
+/* /wall [show|enter|exit] command entry point. */
 void session_handle_wall(session_ctx_t *ctx, const char *arguments)
 {
     if (ctx == nullptr) {

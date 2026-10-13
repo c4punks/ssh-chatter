@@ -1,3 +1,9 @@
+/*
+ * /archive: browse chat history archived to disk, one file per UTC day
+ * (chat_archive_*.dat). "/archive enter <date>" switches the session into a
+ * read-only archive view; "/archive exit" restores the live chat context.
+ */
+
 #include "ssh_chatter/host.h"
 #include "../internal.h"
 
@@ -5,6 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/*
+ * Localized UI strings. Each helper returns the text for the session's UI
+ * language and falls back to English.
+ */
 
 static const char *archive_text_header(session_ui_language_t lang)
 {
@@ -146,6 +157,7 @@ static const char *archive_text_enter_usage(session_ui_language_t lang)
     }
 }
 
+/* UI language for archive messages (English when out of range). */
 static session_ui_language_t archive_current_language(session_ctx_t *ctx)
 {
     session_ui_language_t lang = session_ui_language_current(ctx);
@@ -155,6 +167,12 @@ static session_ui_language_t archive_current_language(session_ctx_t *ctx)
     return lang;
 }
 
+/*
+ * Collect archive file names, sorted (dates sort chronologically). The
+ * directory is $CHATTER_ARCHIVE_DIR, else $CHATTER_STATE_DIR, else the
+ * directory of the host state file, else ".". The list is allocated with
+ * malloc and must be released with host_archive_free_file_list().
+ */
 static bool host_archive_list_files(host_t *host, char ***out_files,
                                     size_t *out_count)
 {
@@ -198,6 +216,7 @@ static bool host_archive_list_files(host_t *host, char ***out_files,
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != nullptr) {
+        /* Only "chat_archive_*.dat"; the prefix check guarantees len >= 13. */
         if (strncmp(entry->d_name, "chat_archive_", 13) != 0 ||
             strcmp(entry->d_name + strlen(entry->d_name) - 4, ".dat") != 0) {
             continue;
@@ -227,6 +246,7 @@ static bool host_archive_list_files(host_t *host, char ***out_files,
     return true;
 }
 
+/* Free a list returned by host_archive_list_files(). */
 static void host_archive_free_file_list(char **files, size_t count)
 {
     if (files == nullptr) {
@@ -238,6 +258,10 @@ static void host_archive_free_file_list(char **files, size_t count)
     free(files);
 }
 
+/*
+ * Print archived entries framed by a header and an exit hint. Output is
+ * buffered into one write unless the caller already enabled buffering.
+ */
 static void session_archive_render_entries(session_ctx_t *ctx,
                                            const chat_history_entry_t *entries,
                                            size_t count)
@@ -271,6 +295,7 @@ static void session_archive_render_entries(session_ctx_t *ctx,
     }
 }
 
+/* /archive list: show the available archive files. */
 static void session_handle_archive_list(session_ctx_t *ctx)
 {
     if (ctx == nullptr || ctx->owner == nullptr) {
@@ -294,6 +319,10 @@ static void session_handle_archive_list(session_ctx_t *ctx)
     host_archive_free_file_list(files, count);
 }
 
+/*
+ * /archive enter <YYYY-MM-DD>: load that day's archive and switch into
+ * archive mode. The live chat context is pushed so exit can restore it.
+ */
 static void session_handle_archive_enter(session_ctx_t *ctx, const char *date_str)
 {
     if (ctx == nullptr || ctx->owner == nullptr || date_str == nullptr) {
@@ -320,6 +349,7 @@ static void session_handle_archive_enter(session_ctx_t *ctx, const char *date_st
     session_archive_render_entries(ctx, entries, count);
 }
 
+/* /archive exit: leave archive mode and restore the saved chat context. */
 static void session_handle_archive_exit(session_ctx_t *ctx)
 {
     if (ctx == nullptr) {
@@ -338,6 +368,7 @@ static void session_handle_archive_exit(session_ctx_t *ctx)
     session_send_system_line(ctx, archive_text_left_mode(lang));
 }
 
+/* /archive <list|enter <date>|exit> entry point. */
 void session_handle_archive(session_ctx_t *ctx, const char *arguments)
 {
     if (ctx == nullptr) {

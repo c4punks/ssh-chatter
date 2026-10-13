@@ -1,8 +1,16 @@
+/**
+ * @file palettes.h
+ * @desc ANSI SGR escape sequences used to build user and system themes,
+ *       plus helpers for 256-color sequences. Sticking to these classic
+ *       16 colors keeps output readable on retro terminals.
+ */
 #ifndef PALETTES_H
 #define PALETTES_H
 
+/* Attributes */
 #define ANSI_RESET "\033[0m"
 #define ANSI_BOLD "\033[1m"
+/* Standard foreground colors (SGR 30-37, 39 = terminal default) */
 #define ANSI_BLACK "\x1b[30m"
 #define ANSI_RED "\x1b[31m"
 #define ANSI_GREEN "\x1b[32m"
@@ -13,6 +21,7 @@
 #define ANSI_WHITE "\x1b[37m"
 #define ANSI_DEFAULT "\x1b[39m"
 
+/* Standard background colors (SGR 40-47, 49 = terminal default) */
 #define ANSI_BG_BLACK "\x1b[40m"
 #define ANSI_BG_RED "\x1b[41m"
 #define ANSI_BG_GREEN "\x1b[42m"
@@ -23,6 +32,7 @@
 #define ANSI_BG_WHITE "\x1b[47m"
 #define ANSI_BG_DEFAULT "\x1b[49m"
 
+/* Bright foreground colors (SGR 90-97) */
 #define ANSI_BRIGHT_BLACK "\x1b[90m"
 #define ANSI_BRIGHT_RED "\x1b[91m"
 #define ANSI_BRIGHT_GREEN "\x1b[92m"
@@ -32,6 +42,7 @@
 #define ANSI_BRIGHT_CYAN "\x1b[96m"
 #define ANSI_BRIGHT_WHITE "\x1b[97m"
 
+/* Bright background colors (SGR 100-107) */
 #define ANSI_BG_BRIGHT_BLACK "\x1b[100m"
 #define ANSI_BG_BRIGHT_RED "\x1b[101m"
 #define ANSI_BG_BRIGHT_GREEN "\x1b[102m"
@@ -44,6 +55,10 @@
 #include <stddef.h>
 #include <stdio.h>
 
+/**
+ * @desc Write a 256-color foreground sequence (ESC[38;5;Nm) into buffer.
+ * @return snprintf() result, or 0 when buffer_len is 0.
+ */
 static inline int ansi_256(char *buffer, size_t buffer_len,
                            unsigned int color_code)
 {
@@ -53,6 +68,10 @@ static inline int ansi_256(char *buffer, size_t buffer_len,
     return snprintf(buffer, buffer_len, "\033[38;5;%um", color_code);
 }
 
+/**
+ * @desc Write a 256-color background sequence (ESC[48;5;Nm) into buffer.
+ * @return snprintf() result, or 0 when buffer_len is 0.
+ */
 static inline int ansi_bg_256(char *buffer, size_t buffer_len,
                               unsigned int color_code)
 {
@@ -62,6 +81,7 @@ static inline int ansi_bg_256(char *buffer, size_t buffer_len,
     return snprintf(buffer, buffer_len, "\033[48;5;%um", color_code);
 }
 
+/* 256-color indices for the "monokai blue" palette. */
 #define MONOKAI_BLUE_BACKGROUND_COLOR 235
 #define MONOKAI_BLUE_FOREGROUND_COLOR 252
 #define MONOKAI_BLUE_HIGHLIGHT_COLOR 220

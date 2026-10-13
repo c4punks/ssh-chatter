@@ -5,6 +5,23 @@
 
     return true;
 }
+
+/*
+ * Main host state file loader (chat history, user preferences, operator
+ * grants, global toggles) plus the separate per-user UI language file.
+ *
+ * The state file has gone through many format versions; readers branch on
+ * the header version and upgrade older records in memory. The first lines
+ * of this file finish a helper begun in eliza_worker.c (both are #included
+ * in sequence by security_moderation.c).
+ */
+
+/*
+ * Read history_count history records. Only the newest
+ * SSH_CHATTER_HISTORY_CACHE_LIMIT entries are kept in memory, but every
+ * valid entry is counted in history_total so message numbering stays
+ * stable. Invalid entries are skipped. Caller holds host->lock.
+ */
 static bool host_state_load_history_entries(FILE *fp, host_t *host,
                                             uint32_t version,
                                             uint32_t history_count)
@@ -44,6 +61,7 @@ static bool host_state_load_history_entries(FILE *fp, host_t *host,
 
         ++total_kept;
 
+        /* Cache full: slide the window forward by one entry. */
         if (cache_limit > 0U && host->history_count == cache_limit) {
             memmove(host->history, host->history + 1,
                     (cache_limit - 1U) * sizeof(host->history[0]));
@@ -61,6 +79,7 @@ static bool host_state_load_history_entries(FILE *fp, host_t *host,
         }
     }
 
+    /* history_start_index = number of older entries not held in memory. */
     if (cache_limit > 0U) {
         size_t expected_start =
             (total_kept > host->history_count) ? (total_kept - host->history_count)
@@ -72,6 +91,15 @@ static bool host_state_load_history_entries(FILE *fp, host_t *host,
     return true;
 }
 
+/*
+ * Read one preference record in the layout used by file format version
+ * and upgrade it to the current host_state_preference_entry_t. Fields that
+ * did not exist in older versions are cleared.
+ *   v14+   current layout
+ *   v12-13 no user color/highlight escape codes
+ *   v10-11 v9 layout (no IP, color codes or provider label)
+ *   v4-9   progressively older layouts
+ */
 static bool host_state_read_preference_entry(FILE *fp, uint32_t version,
                                              host_state_preference_entry_t *out)
 {
@@ -88,6 +116,7 @@ static bool host_state_read_preference_entry(FILE *fp, uint32_t version,
         return true;
     }
 
+    /* v12-13: the two color-code fields are missing from the middle. */
     if (version >= 12U) {
         const size_t legacy_prefix_size =
             offsetof(host_state_preference_entry_t, user_color_code);
@@ -387,6 +416,10 @@ static bool host_state_read_preference_entry(FILE *fp, uint32_t version,
     return true;
 }
 
+/*
+ * Append a deserialized preference to host->preferences, ignoring records
+ * beyond SSH_CHATTER_MAX_PREFERENCES. Caller holds host->lock.
+ */
 static void host_state_apply_preference_entry(
     host_t *host, const host_state_preference_entry_t *serialized)
 {
@@ -452,6 +485,7 @@ static void host_state_apply_preference_entry(
     ++host->preference_count;
 }
 
+/* Replace all in-memory preferences with preference_count file records. */
 static bool host_state_load_preferences(FILE *fp, host_t *host,
                                         uint32_t version,
                                         uint32_t preference_count)
@@ -477,6 +511,7 @@ static bool host_state_load_preferences(FILE *fp, host_t *host,
     return true;
 }
 
+/* Replace operator IP grants (/grant) with the records in the file. */
 static bool host_state_load_grants(FILE *fp, host_t *host, uint32_t grant_count)
 {
     if (fp == nullptr || host == nullptr) {
@@ -506,6 +541,7 @@ static bool host_state_load_grants(FILE *fp, host_t *host, uint32_t grant_count)
     return true;
 }
 
+/* Discard partially loaded history and preferences after a read error. */
 static void host_state_reset_loaded_data(host_t *host)
 {
     if (host == nullptr) {
@@ -523,6 +559,7 @@ static void host_state_reset_loaded_data(host_t *host)
            SSH_CHATTER_MAX_PREFERENCES * sizeof(user_preference_t));
 }
 
+/* Never hand out a message id that could collide with a stored message. */
 static uint64_t host_state_normalize_next_message_id(uint64_t requested,
                                                      size_t history_total)
 {
@@ -533,6 +570,11 @@ static uint64_t host_state_normalize_next_message_id(uint64_t requested,
     return requested;
 }
 
+/*
+ * Load the main state file at startup. Sections are read in file order:
+ * header, metadata, history, preferences, grants. Any failure resets the
+ * history and preferences instead of keeping a partial load.
+ */
 static void host_state_load(host_t *host)
 {
     if (host == nullptr) {
@@ -569,12 +611,18 @@ static void host_state_load(host_t *host)
         return;
     }
 
+    /*
+     * NOTE: clamping here means extra preference records are left unread,
+     * so a file holding more than SSH_CHATTER_MAX_PREFERENCES entries would
+     * make the grant section below start at the wrong offset.
+     */
     if (preference_count > SSH_CHATTER_MAX_PREFERENCES) {
         preference_count = SSH_CHATTER_MAX_PREFERENCES;
     }
 
     ttak_mutex_lock(&host->lock);
 
+    /* Global toggles only exist in newer formats; keep defaults otherwise. */
     if (version >= 8U) {
         atomic_store(&host->captcha_enabled, captcha_enabled_raw != 0U);
     }
@@ -612,6 +660,11 @@ static void host_state_load(host_t *host)
     host_history_cleanup_expired(host);
 }
 
+/*
+ * Save every preference that has a UI language set to the separate UI
+ * language state file (temp file + fsync + rename, mode 0600). Caller holds
+ * host->lock.
+ */
 static void host_ui_language_state_save_locked(host_t *host)
 {
     if (host == nullptr || host->ui_lang_state_file_path[0] == '\0') {
@@ -701,6 +754,11 @@ static void host_ui_language_state_save_locked(host_t *host)
     }
 }
 
+/*
+ * Merge the UI language file into the preferences, creating preference
+ * entries as needed. A UI language already set in memory is not
+ * overwritten. Strings read from disk are force-terminated.
+ */
 static void host_ui_language_state_load(host_t *host)
 {
     if (host == nullptr || host->ui_lang_state_file_path[0] == '\0') {
