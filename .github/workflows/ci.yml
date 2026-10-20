@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [uncensored]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only the submodules the build needs; lib/doorgame is vendored and
+      # .gitmodules has no usable mapping for every recorded path.
+      - name: Fetch submodules
+        run: git submodule update --init --depth 1 lib/inih lib/libttak
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssh-dev libcurl4-openssl-dev \
+            libssl-dev liblz4-dev
+
+      - name: Build
+        run: make -j"$(nproc)"
+
+      - name: Unit tests
+        run: make unit-test
