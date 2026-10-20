@@ -986,7 +986,42 @@ bool ddial_split_reply(const char *body, size_t *out_text_len,
     }
     const char *p = marker + sizeof(DDIAL_REPLY_MARKER) - 1U;
     uint16_t slot = 0U;
-    if (*p == '[') {
+    /* Some clients quote the speaker in wire form instead:
+     * ">>RE:#1[T1:MerZz) quote" (optionally "~#..."). */
+    const char *wire = *p == (char)DDIAL_LINK_ESCAPE ? p + 1 : p;
+    if (*wire == '#') {
+        char handle[DDIAL_MAX_HANDLE_LEN];
+        uint16_t wire_slot = 0U;
+        const char *q = wire;
+        if (!ddial_parse_identity(&q, &wire_slot, nullptr, nullptr, handle,
+                                  sizeof(handle)) ||
+            handle[0] == '\0') {
+            return false;
+        }
+        if (*q == ' ') {
+            ++q;
+        }
+        if (out_author != nullptr && author_cap > 0U) {
+            snprintf(out_author, author_cap, "%s", handle);
+        }
+        if (out_text_len != nullptr) {
+            *out_text_len = (size_t)(marker - body);
+        }
+        if (out_quoted_slot != nullptr) {
+            *out_quoted_slot = wire_slot;
+        }
+        if (out_quote != nullptr) {
+            *out_quote = q;
+        }
+        return true;
+    }
+    /* "[] author: quote" -- the line number left empty. */
+    if (p[0] == '[' && p[1] == ']') {
+        p += 2;
+        while (*p == ' ') {
+            ++p;
+        }
+    } else if (*p == '[') {
         const char *q = p + 1;
         unsigned long value = 0UL;
         bool digits = false;

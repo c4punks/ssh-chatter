@@ -129,6 +129,36 @@ TEST(split_round_trips_format)
     CHECK_STR_EQ(quote, "are you there?");
 }
 
+TEST(split_reply_in_wire_form_and_empty_brackets)
+{
+    uint16_t slot = 0U;
+    char author[DDIAL_MAX_HANDLE_LEN];
+    const char *quote = NULL;
+    size_t text_len = 0U;
+    CHECK(ddial_split_reply("did he say it?^ >>RE:#1[T1:MerZz) just when I",
+                            &text_len, &slot, author, sizeof(author), &quote));
+    CHECK_EQ(text_len, strlen("did he say it?"));
+    CHECK_EQ(slot, 1);
+    CHECK_STR_EQ(author, "MerZz");
+    CHECK_STR_EQ(quote, "just when I");
+
+    CHECK(ddial_split_reply("teets^ >>RE:#12(T1:Ginger Kitty) greets",
+                            NULL, &slot, author, sizeof(author), &quote));
+    CHECK_EQ(slot, 12);
+    CHECK_STR_EQ(author, "Ginger Kitty");
+    CHECK_STR_EQ(quote, "greets");
+
+    slot = 9U;
+    CHECK(ddial_split_reply("so?^ >>RE:[] darksix: spoof it", NULL, &slot,
+                            author, sizeof(author), &quote));
+    CHECK_EQ(slot, 0);
+    CHECK_STR_EQ(author, "darksix");
+    CHECK_STR_EQ(quote, "spoof it");
+
+    CHECK(!ddial_split_reply("x^ >>RE:#1[T1:) q", NULL, NULL, NULL, 0U,
+                             NULL));
+}
+
 TEST(split_rejects_non_replies)
 {
     CHECK(!ddial_split_reply("plain chat", NULL, NULL, NULL, 0U, NULL));
@@ -206,6 +236,7 @@ int main(void)
     RUN_TEST(split_reply_with_line_number);
     RUN_TEST(split_reply_without_line_number);
     RUN_TEST(split_round_trips_format);
+    RUN_TEST(split_reply_in_wire_form_and_empty_brackets);
     RUN_TEST(split_rejects_non_replies);
     RUN_TEST(quote_matches_whole_and_clipped_parent);
     RUN_TEST(quote_ignores_the_parents_own_reply_tail);
