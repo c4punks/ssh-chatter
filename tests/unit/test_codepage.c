@@ -176,6 +176,39 @@ TEST(auto_detect)
 #endif
 }
 
+/*
+ * Regression: without uchardet the CP949 branch used to be unreachable
+ * because every EUC-KR Hangul lead byte also set the GB2312 flag.
+ */
+TEST(auto_detect_heuristic_by_pairs)
+{
+#ifndef SSH_CHATTER_HAVE_UCHARDET
+    /* "한글 테스트" in CP949 */
+    const unsigned char korean[] = {0xC7, 0xD1, 0xB1, 0xDB, ' ', 0xC5,
+                                    0xD7, 0xBD, 0xBA, 0xC6, 0xAE};
+    /* "中文" in GBK: leads outside the Hangul range */
+    const unsigned char chinese[] = {0xD6, 0xD0, 0xCE, 0xC4};
+    /* "中国" in GBK: one pair in the Hangul lead range, one outside */
+    const unsigned char mixed[] = {0xD6, 0xD0, 0xB9, 0xFA};
+    /* "あい日本" in Shift-JIS */
+    const unsigned char japanese[] = {0x82, 0xA0, 0x82, 0xA2,
+                                      0x93, 0xFA, 0x96, 0x7B};
+    /* Lone trailing lead byte is ignored rather than misread. */
+    const unsigned char truncated[] = {'o', 'k', 0xC7};
+
+    CHECK_EQ(session_codepage_detect_auto(korean, sizeof(korean)),
+             SESSION_CODEPAGE_CP949);
+    CHECK_EQ(session_codepage_detect_auto(chinese, sizeof(chinese)),
+             SESSION_CODEPAGE_CP936);
+    CHECK_EQ(session_codepage_detect_auto(mixed, sizeof(mixed)),
+             SESSION_CODEPAGE_CP936);
+    CHECK_EQ(session_codepage_detect_auto(japanese, sizeof(japanese)),
+             SESSION_CODEPAGE_CP932);
+    CHECK_EQ(session_codepage_detect_auto(truncated, sizeof(truncated)),
+             SESSION_CODEPAGE_UTF8);
+#endif
+}
+
 int main(void)
 {
     RUN_TEST(codepage_names);
@@ -191,5 +224,6 @@ int main(void)
     RUN_TEST(buffer_to_utf8_and_back);
     RUN_TEST(utf8_to_utf8_is_a_copy);
     RUN_TEST(auto_detect);
+    RUN_TEST(auto_detect_heuristic_by_pairs);
     return TEST_REPORT();
 }

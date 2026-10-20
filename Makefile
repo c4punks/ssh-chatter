@@ -172,7 +172,8 @@ UNIT_DEPS_user_data := src/user_data.c src/security_layer.c
 UNIT_DEPS_security_layer := src/security_layer.c
 UNIT_DEPS_chardet := src/utils/chardet.c
 UNIT_DEPS_codepage := src/codepage.c
-UNIT_DEPS_jwt := src/utils/jwt.c
+# test_jwt.c #includes jwt.c to reach its static base64url helpers.
+UNIT_DEPS_jwt :=
 UNIT_DEPS_abstract_byte_buffer :=
 # Includes host_aggregate.c itself, so it links everything else but main.
 UNIT_DEPS_host_persistence := $(filter-out src/host_aggregate.c src/main.c \
