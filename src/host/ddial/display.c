@@ -70,3 +70,50 @@ bool host_ddial_display_view(const chat_history_entry_t *entry,
     }
     return true;
 }
+
+/* True for a stored relay line that the display filter presents as chat
+ * from a DDial user ("71#4[T1:MaxMouse) text").  These get a message id
+ * like Chatter messages so they can be replied to and reacted on. */
+bool host_ddial_entry_is_relayed_chat(const chat_history_entry_t *entry)
+{
+    if (entry == nullptr || entry->is_user_message) {
+        return false;
+    }
+    char handle[DDIAL_MAX_HANDLE_LEN];
+    const char *body = nullptr;
+    bool is_link = false;
+    return ddial_parse_incoming_chat(entry->message, nullptr, nullptr, nullptr,
+                                     &is_link, nullptr, handle, sizeof(handle),
+                                     &body) &&
+           !is_link && handle[0] != '\0' && body != nullptr;
+}
+
+/* Label for a stored entry's message id: the compact id, prefixed with 'd'
+ * for lines relayed from DDial ("d42" vs "42").  Compact ids always start
+ * with a digit, so the prefix never collides with an id; the decoder
+ * accepts both spellings.  Returns false when the entry has no id. */
+bool host_history_id_label(const chat_history_entry_t *stored, char *buffer,
+                           size_t length)
+{
+    if (buffer == nullptr || length == 0U) {
+        return false;
+    }
+    buffer[0] = '\0';
+    if (stored == nullptr || stored->message_id == 0U) {
+        return false;
+    }
+    const bool relayed = host_ddial_entry_is_relayed_chat(stored);
+    if (relayed) {
+        if (length < 2U) {
+            return false;
+        }
+        buffer[0] = 'd';
+    }
+    size_t offset = relayed ? 1U : 0U;
+    if (!host_compact_id_encode(stored->message_id, buffer + offset,
+                                length - offset)) {
+        buffer[0] = '\0';
+        return false;
+    }
+    return true;
+}

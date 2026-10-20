@@ -956,3 +956,188 @@ bool ddial_parse_incoming_email(const char *line, unsigned *out_from_station,
     }
     return true;
 }
+
+/* ---- DDial-style replies -----------------------------------------------
+ *
+ * A reply travels as ordinary chat whose body ends in a quote of the line
+ * it answers:
+ *
+ *     text^ >>RE:[N] author: quoted text
+ *
+ * '^' is the DDial line break, N is the quoted author's line number (left
+ * out when unknown) and the quote is the parent's own text, without any
+ * ">>RE:" tail of its own.  Clients that understand the marker show the
+ * line as a reply; older ones simply print it. */
+
+#define DDIAL_REPLY_MARKER "^ >>RE:"
+
+bool ddial_split_reply(const char *body, size_t *out_text_len,
+                       uint16_t *out_quoted_slot, char *out_author,
+                       size_t author_cap, const char **out_quote)
+{
+    if (body == nullptr) {
+        return false;
+    }
+    const char *marker = strstr(body, DDIAL_REPLY_MARKER);
+    if (marker == nullptr) {
+        return false;
+    }
+    const char *p = marker + sizeof(DDIAL_REPLY_MARKER) - 1U;
+    uint16_t slot = 0U;
+    if (*p == '[') {
+        const char *q = p + 1;
+        unsigned long value = 0UL;
+        bool digits = false;
+        while (isdigit((unsigned char)*q) && value <= UINT16_MAX) {
+            value = value * 10UL + (unsigned long)(*q - '0');
+            digits = true;
+            ++q;
+        }
+        if (!digits || *q != ']' || value > UINT16_MAX) {
+            return false;
+        }
+        slot = (uint16_t)value;
+        p = q + 1;
+        while (*p == ' ') {
+            ++p;
+        }
+    }
+    const char *sep = strstr(p, ": ");
+    if (sep == nullptr || sep == p) {
+        return false;
+    }
+    if (out_author != nullptr && author_cap > 0U) {
+        size_t len = (size_t)(sep - p);
+        if (len >= author_cap) {
+            len = author_cap - 1U;
+        }
+        memcpy(out_author, p, len);
+        out_author[len] = '\0';
+    }
+    if (out_text_len != nullptr) {
+        *out_text_len = (size_t)(marker - body);
+    }
+    if (out_quoted_slot != nullptr) {
+        *out_quoted_slot = slot;
+    }
+    if (out_quote != nullptr) {
+        *out_quote = sep + 2;
+    }
+    return true;
+}
+
+/* Copy src into dst as one line: CR/LF/tab become spaces, other control
+ * bytes are dropped. Returns the length written. */
+static size_t ddial_reply_copy_flat(const char *src, size_t src_len,
+                                    char *dst, size_t dst_cap)
+{
+    size_t j = 0U;
+    for (size_t i = 0U; i < src_len && src[i] != '\0' && j + 1U < dst_cap;
+         ++i) {
+        unsigned char c = (unsigned char)src[i];
+        if (c == '\r' || c == '\n' || c == '\t') {
+            c = ' ';
+        } else if (c < 0x20U || c == 0x7FU) {
+            continue;
+        }
+        dst[j++] = (char)c;
+    }
+    dst[j] = '\0';
+    return j;
+}
+
+bool ddial_format_reply_body(char *dst, size_t dst_cap, const char *text,
+                             uint16_t quoted_slot, const char *author,
+                             const char *quote)
+{
+    if (dst == nullptr || dst_cap == 0U) {
+        return false;
+    }
+    dst[0] = '\0';
+    if (text == nullptr || author == nullptr || quote == nullptr) {
+        return false;
+    }
+
+    char clean_author[DDIAL_MAX_HANDLE_LEN];
+    if (ddial_sanitize_handle(author, strlen(author), clean_author,
+                              sizeof(clean_author)) == 0U ||
+        clean_author[0] == '\0') {
+        return false;
+    }
+
+    /* Quote only what the parent said, not the reply it was itself. */
+    size_t quote_len = strlen(quote);
+    size_t parent_text_len = 0U;
+    if (ddial_split_reply(quote, &parent_text_len, nullptr, nullptr, 0U,
+                          nullptr)) {
+        quote_len = parent_text_len;
+    }
+
+    char flat_text[DDIAL_MAX_BODY_LEN + 1U];
+    size_t text_len =
+        ddial_reply_copy_flat(text, strlen(text), flat_text, sizeof(flat_text));
+    char flat_quote[DDIAL_MAX_BODY_LEN + 1U];
+    size_t flat_quote_len =
+        ddial_reply_copy_flat(quote, quote_len, flat_quote, sizeof(flat_quote));
+    while (text_len > 0U && flat_text[text_len - 1U] == ' ') {
+        flat_text[--text_len] = '\0';
+    }
+    if (text_len == 0U || flat_quote_len == 0U) {
+        return false;
+    }
+
+    char head[DDIAL_MAX_HANDLE_LEN + 32U];
+    int head_len;
+    if (quoted_slot != 0U) {
+        head_len = snprintf(head, sizeof(head), DDIAL_REPLY_MARKER "[%u] %s: ",
+                            (unsigned)quoted_slot, clean_author);
+    } else {
+        head_len = snprintf(head, sizeof(head), DDIAL_REPLY_MARKER "%s: ",
+                            clean_author);
+    }
+    if (head_len <= 0 || (size_t)head_len >= sizeof(head)) {
+        return false;
+    }
+
+    size_t limit = dst_cap - 1U;
+    if (limit > DDIAL_MAX_BODY_LEN) {
+        limit = DDIAL_MAX_BODY_LEN;
+    }
+    /* The reply text wins; the quote is clipped to what is left, but keep
+     * a few quoted characters so the receiver can still match the parent. */
+    enum { DDIAL_REPLY_MIN_QUOTE = 16 };
+    size_t min_quote = flat_quote_len < DDIAL_REPLY_MIN_QUOTE
+                           ? flat_quote_len
+                           : DDIAL_REPLY_MIN_QUOTE;
+    if ((size_t)head_len + min_quote > limit) {
+        return false;
+    }
+    if (text_len + (size_t)head_len + min_quote > limit) {
+        text_len = limit - (size_t)head_len - min_quote;
+    }
+    size_t room = limit - text_len - (size_t)head_len;
+    if (flat_quote_len > room) {
+        flat_quote_len = room;
+    }
+
+    memcpy(dst, flat_text, text_len);
+    memcpy(dst + text_len, head, (size_t)head_len);
+    memcpy(dst + text_len + (size_t)head_len, flat_quote, flat_quote_len);
+    dst[text_len + (size_t)head_len + flat_quote_len] = '\0';
+    return true;
+}
+
+/* A station link key is exactly nine ASCII digits. */
+bool ddial_station_key_is_wellformed(const char *key)
+{
+    if (key == nullptr) {
+        return false;
+    }
+    size_t len = 0U;
+    for (; key[len] != '\0'; ++len) {
+        if (!isdigit((unsigned char)key[len]) || len >= DDIAL_STATION_KEY_LEN) {
+            return false;
+        }
+    }
+    return len == DDIAL_STATION_KEY_LEN;
+}

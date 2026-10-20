@@ -1027,7 +1027,11 @@ static void session_render_history_entry(session_ctx_t *ctx,
         return;
     }
 
-    // Show what the display filter says, not the stored text.
+    // Show what the display filter says, not the stored text.  The id
+    // label comes from the stored entry: relayed DDial lines read "d<id>".
+    char id_label[32];
+    const bool has_id_label =
+        host_history_id_label(entry, id_label, sizeof(id_label));
     chat_history_entry_t ddial_view;
     if (!host_ddial_display_view(entry, &ddial_view, &entry)) {
         return;
@@ -1056,13 +1060,7 @@ static void session_render_history_entry(session_ctx_t *ctx,
             (color[0] != '\0') || (highlight[0] != '\0');
 
         char name_block[SSH_CHATTER_MESSAGE_LIMIT];
-        const char *id_display = "-";
-        char id_label[32];
-        if (entry->message_id > 0U &&
-            host_compact_id_encode(entry->message_id, id_label,
-                                   sizeof(id_label))) {
-            id_display = id_label;
-        }
+        const char *id_display = has_id_label ? id_label : "-";
         const char *display_name = chat_history_entry_display_name(entry);
         if (has_custom_codes) {
             snprintf(name_block, sizeof(name_block), ANSI_CYAN "[%s]" ANSI_RESET " <%s%s%s%s%s>",

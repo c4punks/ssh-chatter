@@ -1573,6 +1573,10 @@ bool host_ddial_client_configure(host_t *host, const char *host_str, int port,
 void host_ddial_client_disconnect(host_t *host);
 void host_ddial_client_reconnect(host_t *host);
 void host_ddial_client_start(host_t *host);
+/* Accept station links from other DDial stations (ddial/hub.c), when
+ * CHATTER_DDIAL_HUB_LISTEN is set. */
+void host_ddial_hub_start(host_t *host);
+void host_ddial_hub_stop(host_t *host);
 void host_ddial_client_send(host_t *host, const char *handle,
                             const char *message);
 /* from_slot is the speaker's line number on our station (dial-in slot or
@@ -1631,6 +1635,12 @@ size_t host_ddial_foreach_participant(host_t *host,
 bool host_ddial_display_view(const chat_history_entry_t *entry,
                              chat_history_entry_t *scratch,
                              const chat_history_entry_t **view);
+/* True for a stored relay line shown as chat from a DDial user; such lines
+ * carry a message id. host_history_id_label() writes an entry's id label,
+ * "d<id>" for those relayed lines and "<id>" otherwise. */
+bool host_ddial_entry_is_relayed_chat(const chat_history_entry_t *entry);
+bool host_history_id_label(const chat_history_entry_t *stored, char *buffer,
+                           size_t length);
 /* Mail bridge between Chatter mailboxes and DDial member mailboxes
  * (ddial/mailbridge.c).  error receives a constant English message. */
 bool host_ddial_member_exists(host_t *host, const char *handle);

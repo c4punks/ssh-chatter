@@ -1027,7 +1027,7 @@ chat_room_broadcast_reaction_update(host_t *host,
     char line[SSH_CHATTER_MESSAGE_LIMIT];
     if (entry->message_id > 0U) {
         char label[32];
-        if (!host_compact_id_encode(entry->message_id, label, sizeof(label))) {
+        if (!host_history_id_label(entry, label, sizeof(label))) {
             snprintf(label, sizeof(label), "%" PRIu64, entry->message_id);
         }
         snprintf(line, sizeof(line), "    ->[#%s] - %s", label, summary);
@@ -2083,7 +2083,10 @@ static bool host_history_commit_entry(host_t *host, chat_history_entry_t *entry,
 
     host_history_restore_cache(host);
     ttak_mutex_lock(&host->lock);
-    if (entry->is_user_message) {
+    /* Chat relayed from DDial is stored as a system line but shown as a
+     * message, so it shares the id sequence (displayed as "d<id>") and can
+     * be replied to like any other message. */
+    if (entry->is_user_message || host_ddial_entry_is_relayed_chat(entry)) {
         if (host->next_message_id == 0U) {
             host->next_message_id = 1U;
         }

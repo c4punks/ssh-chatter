@@ -69,6 +69,15 @@
 
 #define DDIAL_CLIENT_KEEPALIVE_INTERVAL_SEC 45
 
+/* ddial/hub.c: stations linked to this one get what our upstream gets. */
+static void ddial_hub_send_chat(host_t *host, uint16_t from_slot,
+                                const char *handle, uint8_t channel,
+                                const char *message);
+static void ddial_hub_send_event(host_t *host, uint16_t slot, uint8_t channel,
+                                 ddial_user_tier_t tier, const char *handle,
+                                 uint16_t account, bool is_login);
+static void ddial_hub_forward_upstream_line(host_t *host, const char *line);
+
 /* ddial/mailbridge.c */
 static void host_ddial_mail_link_inbound(host_t *host, unsigned from_station,
                                          unsigned to_id,
@@ -1160,6 +1169,10 @@ static void ddial_client_broadcast_line(host_t *host, const char *line)
 
     if (!is_our_line) {
         host_ddial_relay_upstream_line(host, line);
+        if (parsed_message != nullptr &&
+            !host_ddial_handle_is_local(host, parsed_handle, true)) {
+            ddial_hub_forward_upstream_line(host, line);
+        }
     }
 
     char display_line[SSH_CHATTER_MESSAGE_LIMIT + 128];
@@ -2075,6 +2088,7 @@ void host_ddial_shutdown(host_t *host)
         return;
     }
     host_ddial_client_stop(host);
+    host_ddial_hub_stop(host);
     host_ddial_listener_stop(host);
     ddial_client_t *client = (ddial_client_t *)&host->ddial_relay;
     if (client->lock_initialized) {
@@ -2167,6 +2181,10 @@ void host_ddial_client_send_channel(host_t *host, uint16_t from_slot,
         return;
     }
     ddial_client_t *client = (ddial_client_t *)&host->ddial_relay;
+
+    /* Stations linked to this one hear the same chat, whether or not our
+     * own upstream link is up. */
+    ddial_hub_send_chat(host, from_slot, handle, channel, message);
 
     /* Snapshot connection state briefly, then format the wire message without
      * holding client->lock so inbound traffic can still be processed. */
@@ -2342,6 +2360,9 @@ static void host_ddial_client_send_link_event(host_t *host, uint16_t slot,
         return;
     }
     ddial_client_t *client = (ddial_client_t *)&host->ddial_relay;
+
+    ddial_hub_send_event(host, slot, channel, tier, handle, account,
+                         is_login);
 
     ttak_mutex_lock(&client->lock);
     bool enabled      = client->enabled;
