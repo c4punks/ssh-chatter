@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 static const char *ddial_tier_symbol(ddial_user_tier_t tier)
 {
@@ -970,6 +971,7 @@ bool ddial_parse_incoming_email(const char *line, unsigned *out_from_station,
  * line as a reply; older ones simply print it. */
 
 #define DDIAL_REPLY_MARKER "^ >>RE:"
+#define SSH_CHATTER_DDIAL_FOLD_CAP 1024U
 
 bool ddial_split_reply(const char *body, size_t *out_text_len,
                        uint16_t *out_quoted_slot, char *out_author,
@@ -1140,4 +1142,87 @@ bool ddial_station_key_is_wellformed(const char *key)
         }
     }
     return len == DDIAL_STATION_KEY_LEN;
+}
+
+/* Copy src into dst with runs of whitespace folded to one space and the
+ * ends trimmed. */
+static size_t ddial_reply_fold_space(const char *src, size_t src_len, char *dst,
+                                     size_t dst_cap)
+{
+    size_t j = 0U;
+    bool pending_space = false;
+    for (size_t i = 0U; i < src_len && src[i] != '\0' && j + 1U < dst_cap;
+         ++i) {
+        unsigned char c = (unsigned char)src[i];
+        if (isspace(c)) {
+            pending_space = j > 0U;
+            continue;
+        }
+        if (pending_space && j + 2U < dst_cap) {
+            dst[j++] = ' ';
+        }
+        pending_space = false;
+        dst[j++] = (char)c;
+    }
+    dst[j] = '\0';
+    return j;
+}
+
+bool ddial_reply_quote_matches(const char *parent_text, const char *quote)
+{
+    if (parent_text == nullptr || quote == nullptr) {
+        return false;
+    }
+    size_t parent_len = strlen(parent_text);
+    size_t own_len = 0U;
+    if (ddial_split_reply(parent_text, &own_len, nullptr, nullptr, 0U,
+                          nullptr)) {
+        parent_len = own_len;
+    }
+    char parent[SSH_CHATTER_DDIAL_FOLD_CAP];
+    char wanted[SSH_CHATTER_DDIAL_FOLD_CAP];
+    size_t plen = ddial_reply_fold_space(parent_text, parent_len, parent,
+                                         sizeof(parent));
+    size_t qlen = ddial_reply_fold_space(quote, strlen(quote), wanted,
+                                         sizeof(wanted));
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        if (attempt == 1) {
+            /* A clipped quote may end in an ellipsis: drop it and retry. */
+            if (qlen < 3U || strcmp(wanted + qlen - 3U, "...") != 0) {
+                break;
+            }
+            while (qlen > 0U && wanted[qlen - 1U] == '.') {
+                wanted[--qlen] = '\0';
+            }
+            while (qlen > 0U && wanted[qlen - 1U] == ' ') {
+                wanted[--qlen] = '\0';
+            }
+        }
+        if (qlen == 0U || plen == 0U || qlen > plen) {
+            continue;
+        }
+        /* Very short quotes must match whole; longer ones may be clipped. */
+        if (qlen < 4U) {
+            if (qlen == plen && strcmp(parent, wanted) == 0) {
+                return true;
+            }
+            continue;
+        }
+        if (strncmp(parent, wanted, qlen) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ddial_handles_equal(const char *a, const char *b)
+{
+    if (a == nullptr || b == nullptr) {
+        return false;
+    }
+    char ca[DDIAL_MAX_HANDLE_LEN];
+    char cb[DDIAL_MAX_HANDLE_LEN];
+    ddial_sanitize_handle(a, strlen(a), ca, sizeof(ca));
+    ddial_sanitize_handle(b, strlen(b), cb, sizeof(cb));
+    return ca[0] != '\0' && strcasecmp(ca, cb) == 0;
 }

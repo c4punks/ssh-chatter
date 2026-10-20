@@ -139,6 +139,48 @@ TEST(split_rejects_non_replies)
     CHECK(!ddial_split_reply(NULL, NULL, NULL, NULL, 0U, NULL));
 }
 
+/* ---- ddial_reply_quote_matches / ddial_handles_equal ---- */
+
+TEST(quote_matches_whole_and_clipped_parent)
+{
+    CHECK(ddial_reply_quote_matches("nope. here is the article on it",
+                                    "nope. here is the article on it"));
+    CHECK(ddial_reply_quote_matches("nope. here is the article on it",
+                                    "nope. here is"));
+    CHECK(ddial_reply_quote_matches("nope. here is the article",
+                                    "nope. here is..."));
+    CHECK(ddial_reply_quote_matches("a  b\tc", "a b c"));
+    CHECK(!ddial_reply_quote_matches("nope. here", "nope. there"));
+    CHECK(!ddial_reply_quote_matches("short", "short and longer"));
+}
+
+TEST(quote_ignores_the_parents_own_reply_tail)
+{
+    CHECK(ddial_reply_quote_matches(
+        "Just put it on a party boat^ >>RE:[1] MerZz: nope.",
+        "Just put it on a party boat"));
+    CHECK(!ddial_reply_quote_matches(
+        "Just put it on a party boat^ >>RE:[1] MerZz: nope.", "nope."));
+}
+
+TEST(short_quotes_must_match_whole)
+{
+    CHECK(ddial_reply_quote_matches("lol", "lol"));
+    CHECK(!ddial_reply_quote_matches("lolwut", "lol"));
+    CHECK(!ddial_reply_quote_matches("hi", ""));
+    CHECK(!ddial_reply_quote_matches(NULL, "x"));
+}
+
+TEST(handles_compare_like_the_wire)
+{
+    CHECK(ddial_handles_equal("MerZz", "merzz"));
+    CHECK(ddial_handles_equal("Lee Yunjin", "lee yunjin"));
+    CHECK(ddial_handles_equal("Bo)b", "Bob"));
+    CHECK(!ddial_handles_equal("Bob", "Rob"));
+    CHECK(!ddial_handles_equal("", ""));
+    CHECK(!ddial_handles_equal(NULL, "a"));
+}
+
 /* ---- station keys ---- */
 
 TEST(station_key_must_be_nine_digits)
@@ -165,6 +207,10 @@ int main(void)
     RUN_TEST(split_reply_without_line_number);
     RUN_TEST(split_round_trips_format);
     RUN_TEST(split_rejects_non_replies);
+    RUN_TEST(quote_matches_whole_and_clipped_parent);
+    RUN_TEST(quote_ignores_the_parents_own_reply_tail);
+    RUN_TEST(short_quotes_must_match_whole);
+    RUN_TEST(handles_compare_like_the_wire);
     RUN_TEST(station_key_must_be_nine_digits);
     return TEST_REPORT();
 }

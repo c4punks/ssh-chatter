@@ -2105,6 +2105,12 @@ static bool host_history_commit_entry(host_t *host, chat_history_entry_t *entry,
     }
 
     ttak_mutex_unlock(&host->lock);
+
+    /* A DDial reply ("text^ >>RE:...") joins the quoted line's thread. */
+    if (!entry->is_user_message && entry->message_id != 0U &&
+        strstr(entry->message, "^ >>RE:") != nullptr) {
+        host_ddial_link_reply(host, entry);
+    }
     return true;
 }
 
@@ -2118,9 +2124,20 @@ static bool host_replies_commit_entry(host_t *host, chat_reply_entry_t *entry,
     bool committed = false;
 
     ttak_mutex_lock(&host->lock);
-    if (host->reply_count >= SSH_CHATTER_MAX_REPLIES) {
+    host_replies_ensure(host);
+    if (host->replies == nullptr) {
         ttak_mutex_unlock(&host->lock);
         return false;
+    }
+    if (host->reply_count >= SSH_CHATTER_MAX_REPLIES) {
+        /* Full: forget the oldest reply rather than refuse new ones.
+         * Expired history never removes its replies, so the table would
+         * otherwise fill up for good. */
+        memmove(&host->replies[0], &host->replies[1],
+                (host->reply_count - 1U) * sizeof(host->replies[0]));
+        --host->reply_count;
+        memset(&host->replies[host->reply_count], 0,
+               sizeof(host->replies[0]));
     }
 
     uint64_t assigned_id = host->next_reply_id;

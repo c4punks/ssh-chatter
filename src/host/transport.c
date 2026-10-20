@@ -22,3 +22,4 @@
 #include "ddial/integration.c"
 #include "ddial/mailbridge.c"
 #include "ddial/hub.c"
+#include "ddial/replies.c"

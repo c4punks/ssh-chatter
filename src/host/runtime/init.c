@@ -595,6 +595,9 @@ void host_init(host_t *host, auth_profile_t *auth)
     host_vote_state_load(host);
     host_ban_state_load(host);
     host_reply_state_load(host);
+    /* DDial replies in history become Chatter replies (and the display
+     * links are rebuilt); needs both history and reply state. */
+    host_ddial_replies_rebuild(host);
     host_rss_state_load(host);
     host_eliza_memory_load(host);
     host_ai_chat_memory_load(host);

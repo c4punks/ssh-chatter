@@ -1639,6 +1639,14 @@ bool host_ddial_display_view(const chat_history_entry_t *entry,
  * carry a message id. host_history_id_label() writes an entry's id label,
  * "d<id>" for those relayed lines and "<id>" otherwise. */
 bool host_ddial_entry_is_relayed_chat(const chat_history_entry_t *entry);
+/* DDial replies as Chatter replies (ddial/replies.c).  link_reply() takes a
+ * just-stored DDial line; when it is "text^ >>RE:..." and the quoted line is
+ * found, it is recorded as a reply.  reply_link_get() says which reply a
+ * DDial line became and how to label its parent ("#12", "#d12", "r#5"). */
+void host_ddial_link_reply(host_t *host, const chat_history_entry_t *stored);
+void host_ddial_replies_rebuild(host_t *host);
+bool host_ddial_reply_link_get(uint64_t message_id, uint64_t *reply_id,
+                               char *parent_label, size_t label_cap);
 bool host_history_id_label(const chat_history_entry_t *stored, char *buffer,
                            size_t length);
 /* Mail bridge between Chatter mailboxes and DDial member mailboxes
