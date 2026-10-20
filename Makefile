@@ -159,7 +159,27 @@ DISPLAY_TEST_TARGET := display-model-test
 DISPLAY_TEST_SRC := tests/display_model_test.c src/display_model.c
 DISPLAY_TEST_OBJ := $(patsubst %.c,$(BUILD_DIR)/%.o,$(DISPLAY_TEST_SRC))
 
-.PHONY: all clean run stress-test display-model-test
+# Unit tests: tests/unit/test_<name>.c linked against the sources listed in
+# UNIT_DEPS_<name>. `make unit-test` builds and runs every one of them.
+UNIT_TEST_NAMES := translation_helpers user_data security_layer chardet \
+                   codepage jwt abstract_byte_buffer host_persistence
+UNIT_TEST_BIN_DIR := $(BUILD_DIR)/unit
+UNIT_TEST_BINS := $(addprefix $(UNIT_TEST_BIN_DIR)/test_,$(UNIT_TEST_NAMES))
+UNIT_TEST_COMMON_SRC := src/memory_manager.c
+UNIT_DEPS_translation_helpers := src/translation_helpers.c
+UNIT_DEPS_user_data := src/user_data.c src/security_layer.c
+UNIT_DEPS_security_layer := src/security_layer.c
+UNIT_DEPS_chardet := src/utils/chardet.c
+UNIT_DEPS_codepage := src/codepage.c
+UNIT_DEPS_jwt := src/utils/jwt.c
+UNIT_DEPS_abstract_byte_buffer :=
+# Includes host_aggregate.c itself, so it links everything else but main.
+UNIT_DEPS_host_persistence := $(filter-out src/host_aggregate.c src/main.c \
+                                $(UNIT_TEST_COMMON_SRC),$(SRC))
+DEP += $(patsubst %.c,$(BUILD_DIR)/%.d,$(wildcard tests/unit/*.c))
+unit_test_objs = $(patsubst %.c,$(BUILD_DIR)/%.o,$(1))
+
+.PHONY: all clean run stress-test display-model-test unit-test
 
 # ==============================================================================
 # BUILD RULES (Single Stage)
@@ -184,6 +204,22 @@ $(STRESS_TARGET): $(filter-out $(BUILD_DIR)/src/main.o,$(OBJ)) $(STRESS_OBJ) $(T
 
 $(DISPLAY_TEST_TARGET): $(DISPLAY_TEST_OBJ) $(TTAK_LIB)
 	$(CC) $(CFLAGS) -o $@ $^ -Wno-error $(LDFLAGS)
+
+.SECONDARY: $(patsubst %.c,$(BUILD_DIR)/%.o,$(wildcard tests/unit/*.c))
+.SECONDEXPANSION:
+$(UNIT_TEST_BIN_DIR)/test_%: $(BUILD_DIR)/tests/unit/test_%.o \
+        $$(call unit_test_objs,$$(UNIT_DEPS_$$*) $(UNIT_TEST_COMMON_SRC)) \
+        $(TTAK_LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+unit-test: $(UNIT_TEST_BINS) $(DISPLAY_TEST_TARGET)
+	@status=0; \
+	for test_bin in $(UNIT_TEST_BINS) ./$(DISPLAY_TEST_TARGET); do \
+		echo "== $$test_bin"; \
+		$$test_bin || status=1; \
+	done; \
+	exit $$status
 
 $(TTAK_LIB):
 	$(MAKE) -C $(TTAK_DIR) all EXTRA_CFLAGS="$(CFLAGS_EXTRA)" EXTRA_LDFLAGS="$(LDFLAGS_EXTRA)"
