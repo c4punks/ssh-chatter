@@ -122,15 +122,10 @@ static void host_wall_state_save_locked(host_t *host)
 
     bool success = fwrite(&header, sizeof(header), 1U, fp) == 1U;
     if (success) {
-        /*
-         * FIXME: host->wall is a pointer, so sizeof(host->wall) is the pointer
-         * size, not the grid size. Only a few bytes of pixel data are written
-         * and host_wall_state_load() then fails its full-grid fread(), so the
-         * wall is not actually restored across restarts. The intended size is
-         * SSH_CHATTER_WALL_HEIGHT * SSH_CHATTER_WALL_WIDTH *
-         * sizeof(ascii_pixel_t).
-         */
-        success = fwrite(host->wall, sizeof(host->wall), 1U, fp) == 1U;
+        /* host->wall is a pointer; write the whole grid it points to. */
+        success = fwrite(host->wall, sizeof(ascii_pixel_t),
+                         SSH_CHATTER_WALL_HEIGHT * SSH_CHATTER_WALL_WIDTH,
+                         fp) == SSH_CHATTER_WALL_HEIGHT * SSH_CHATTER_WALL_WIDTH;
     }
     /* Flush stdio and the kernel page cache before the rename. */
     if (success && fflush(fp) != 0) {
