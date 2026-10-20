@@ -302,11 +302,17 @@ bool security_layer_encrypt_message(const security_layer_t *layer,
             break;
         }
 
-        OPENSSL_cleanse(working, working_len);
-        sshc_gc_free(working);
+        /*
+         * Only the plaintext copy is owned by working; from the second layer
+         * on, working aliases the previous layer's ciphertext, which must
+         * stay alive until it has been encoded below.
+         */
+        if (idx == 0U) {
+            OPENSSL_cleanse(working, working_len);
+            sshc_gc_free(working);
+        }
         working = component->ciphertext;
         working_len = component->cipher_len;
-        component->ciphertext = working;
     }
 
     if (!success) {
