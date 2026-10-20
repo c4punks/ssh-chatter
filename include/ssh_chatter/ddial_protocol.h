@@ -194,6 +194,13 @@ bool ddial_split_reply(const char *body, size_t *out_text_len,
                        uint16_t *out_quoted_slot, char *out_author,
                        size_t author_cap, const char **out_quote);
 
+/* Does a reply's quote name this parent text?  The parent's own ">>RE:"
+ * tail is ignored, whitespace runs compare equal, and a quote of four or
+ * more characters may be a clipped prefix of the parent. */
+bool ddial_reply_quote_matches(const char *parent_text, const char *quote);
+/* Handles compare equal after wire sanitizing, ignoring case. */
+bool ddial_handles_equal(const char *a, const char *b);
+
 /* True for exactly DDIAL_STATION_KEY_LEN ASCII digits. */
 bool ddial_station_key_is_wellformed(const char *key);
 

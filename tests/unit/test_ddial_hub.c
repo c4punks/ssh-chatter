@@ -99,6 +99,187 @@ TEST(decode_accepts_d_prefix_only_before_digits)
     CHECK(!host_compact_id_decode("dd12", &id));
 }
 
+/* ---- DDial replies joining Chatter threads ---- */
+
+static chat_history_entry_t commit_system(const char *line)
+{
+    chat_history_entry_t entry = {0};
+    snprintf(entry.message, sizeof(entry.message), "%s", line);
+    chat_history_entry_t stored = {0};
+    (void)host_history_commit_entry(g_host, &entry, &stored);
+    return stored;
+}
+
+static chat_history_entry_t commit_user(const char *name, const char *text)
+{
+    chat_history_entry_t entry = {0};
+    entry.is_user_message = true;
+    snprintf(entry.username, sizeof(entry.username), "%s", name);
+    snprintf(entry.message, sizeof(entry.message), "%s", text);
+    chat_history_entry_t stored = {0};
+    (void)host_history_commit_entry(g_host, &entry, &stored);
+    return stored;
+}
+
+static size_t reply_count_for(uint64_t parent_message_id)
+{
+    size_t n = 0U;
+    ttak_mutex_lock(&g_host->lock);
+    for (size_t i = 0U; i < g_host->reply_count; ++i) {
+        if (g_host->replies[i].in_use &&
+            g_host->replies[i].parent_message_id == parent_message_id) {
+            ++n;
+        }
+    }
+    ttak_mutex_unlock(&g_host->lock);
+    return n;
+}
+
+TEST(ddial_reply_to_ddial_line_becomes_a_reply)
+{
+    chat_history_entry_t parent =
+        commit_system("71#1[T1:MerZz) nope. here is the article on it");
+    commit_system("71#2[T1:oxyosbourne) unrelated chatter in between");
+    chat_history_entry_t reply = commit_system(
+        "71#2[T1:oxyosbourne) Just put it on a party boat^ >>RE:[1] MerZz: "
+        "nope. here is the article");
+
+    uint64_t reply_id = 0U;
+    char label[40];
+    CHECK(host_ddial_reply_link_get(reply.message_id, &reply_id, label,
+                                    sizeof(label)));
+    char parent_label[32];
+    CHECK(host_history_id_label(&parent, parent_label, sizeof(parent_label)));
+    char expected[40];
+    snprintf(expected, sizeof(expected), "#%s", parent_label);
+    CHECK_STR_EQ(label, expected);
+
+    chat_reply_entry_t entry = {0};
+    CHECK(host_replies_find_entry_by_id(g_host, reply_id, &entry));
+    CHECK_EQ(entry.parent_message_id, parent.message_id);
+    CHECK_EQ(entry.parent_reply_id, 0);
+    CHECK_STR_EQ(entry.username, "oxyosbourne");
+    CHECK_STR_EQ(entry.message, "Just put it on a party boat");
+
+    /* It is shown the way Chatter shows replies. */
+    chat_history_entry_t scratch;
+    const chat_history_entry_t *view = NULL;
+    CHECK(host_ddial_display_view(&reply, &scratch, &view));
+    CHECK(!view->is_user_message);
+    char reply_label[32];
+    CHECK(host_compact_id_encode(reply_id, reply_label, sizeof(reply_label)));
+    char shown[256];
+    snprintf(shown, sizeof(shown),
+             "->[r#%s #%s] oxyosbourne: Just put it on a party boat",
+             reply_label, parent_label);
+    CHECK_STR_EQ(view->message, shown);
+
+    /* A reply to that reply threads under it. */
+    chat_history_entry_t second = commit_system(
+        "71#2[T1:oxyosbourne) ok I /. vegas?^ >>RE:oxyosbourne: Just put it "
+        "on a party boat");
+    uint64_t second_id = 0U;
+    CHECK(host_ddial_reply_link_get(second.message_id, &second_id, label,
+                                    sizeof(label)));
+    chat_reply_entry_t threaded = {0};
+    CHECK(host_replies_find_entry_by_id(g_host, second_id, &threaded));
+    CHECK_EQ(threaded.parent_message_id, parent.message_id);
+    CHECK_EQ(threaded.parent_reply_id, reply_id);
+    snprintf(expected, sizeof(expected), "r#%s", reply_label);
+    CHECK_STR_EQ(label, expected);
+}
+
+TEST(ddial_reply_to_chatter_message_and_chatter_reply)
+{
+    chat_history_entry_t msg = commit_user("Lee Yunjin", "anyone up for chess?");
+    chat_history_entry_t reply = commit_system(
+        "71#4[T1:MaxMouse) sure, one game^ >>RE:Lee Yunjin: anyone up for "
+        "chess?");
+    uint64_t reply_id = 0U;
+    char label[40];
+    CHECK(host_ddial_reply_link_get(reply.message_id, &reply_id, label,
+                                    sizeof(label)));
+    char msg_label[32];
+    CHECK(host_compact_id_encode(msg.message_id, msg_label, sizeof(msg_label)));
+    char expected[40];
+    snprintf(expected, sizeof(expected), "#%s", msg_label);
+    CHECK_STR_EQ(label, expected);
+
+    /* A Chatter reply line as the quoted parent. */
+    chat_reply_entry_t chatter_reply = {0};
+    chatter_reply.parent_message_id = msg.message_id;
+    snprintf(chatter_reply.username, sizeof(chatter_reply.username), "%s",
+             "tester");
+    snprintf(chatter_reply.message, sizeof(chatter_reply.message), "%s",
+             "count me in too");
+    chat_reply_entry_t committed = {0};
+    CHECK(host_replies_commit_entry(g_host, &chatter_reply, &committed));
+    char r_label[32];
+    CHECK(host_compact_id_encode(committed.reply_id, r_label, sizeof(r_label)));
+    char line[256];
+    snprintf(line, sizeof(line), "->[r#%s #%s] tester: count me in too",
+             r_label, msg_label);
+    commit_system(line);
+    chat_history_entry_t answer = commit_system(
+        "71#4[T1:MaxMouse) welcome!^ >>RE:tester: count me in too");
+    uint64_t answer_id = 0U;
+    CHECK(host_ddial_reply_link_get(answer.message_id, &answer_id, label,
+                                    sizeof(label)));
+    chat_reply_entry_t threaded = {0};
+    CHECK(host_replies_find_entry_by_id(g_host, answer_id, &threaded));
+    CHECK_EQ(threaded.parent_message_id, msg.message_id);
+    CHECK_EQ(threaded.parent_reply_id, committed.reply_id);
+}
+
+TEST(unmatched_ddial_reply_stays_a_plain_line)
+{
+    chat_history_entry_t orphan = commit_system(
+        "71#5[T1:Ghost) what?^ >>RE:Nobody: a line that never existed");
+    CHECK(!host_ddial_reply_link_get(orphan.message_id, NULL, NULL, 0U));
+    chat_history_entry_t scratch;
+    const chat_history_entry_t *view = NULL;
+    CHECK(host_ddial_display_view(&orphan, &scratch, &view));
+    CHECK(view->is_user_message);
+    CHECK_STR_EQ(view->username, "Ghost");
+}
+
+TEST(rebuild_is_idempotent)
+{
+    chat_history_entry_t parent = commit_system("71#6[T1:Ann) are you there?");
+    commit_system("71#7[T1:Ben) yes^ >>RE:[6] Ann: are you there?");
+    CHECK_EQ(reply_count_for(parent.message_id), 1);
+    host_ddial_replies_rebuild(g_host);
+    host_ddial_replies_rebuild(g_host);
+    CHECK_EQ(reply_count_for(parent.message_id), 1);
+}
+
+TEST(full_reply_table_drops_the_oldest)
+{
+    ttak_mutex_lock(&g_host->lock);
+    host_replies_ensure(g_host);
+    size_t before = g_host->reply_count;
+    ttak_mutex_unlock(&g_host->lock);
+    chat_reply_entry_t entry = {0};
+    entry.parent_message_id = 1U;
+    snprintf(entry.username, sizeof(entry.username), "%s", "filler");
+    for (size_t i = before; i < SSH_CHATTER_MAX_REPLIES + 5U; ++i) {
+        snprintf(entry.message, sizeof(entry.message), "fill %zu", i);
+        chat_reply_entry_t stored = {0};
+        CHECK(host_replies_commit_entry(g_host, &entry, &stored));
+    }
+    ttak_mutex_lock(&g_host->lock);
+    size_t count = g_host->reply_count;
+    char last[64];
+    snprintf(last, sizeof(last), "%s",
+             g_host->replies[g_host->reply_count - 1U].message);
+    ttak_mutex_unlock(&g_host->lock);
+    CHECK_EQ(count, SSH_CHATTER_MAX_REPLIES);
+    char expected[64];
+    snprintf(expected, sizeof(expected), "fill %zu",
+             (size_t)SSH_CHATTER_MAX_REPLIES + 4U);
+    CHECK_STR_EQ(last, expected);
+}
+
 /* ---- station keys ---- */
 
 TEST(station_key_create_match_revoke)
@@ -335,6 +516,11 @@ int main(void)
     RUN_TEST(plain_system_lines_stay_without_id);
     RUN_TEST(chatter_ids_keep_their_plain_label);
     RUN_TEST(decode_accepts_d_prefix_only_before_digits);
+    RUN_TEST(ddial_reply_to_ddial_line_becomes_a_reply);
+    RUN_TEST(ddial_reply_to_chatter_message_and_chatter_reply);
+    RUN_TEST(unmatched_ddial_reply_stays_a_plain_line);
+    RUN_TEST(rebuild_is_idempotent);
+    RUN_TEST(full_reply_table_drops_the_oldest);
     RUN_TEST(station_key_create_match_revoke);
     RUN_TEST(failed_logins_block_an_address);
     RUN_TEST(station_links_with_key_and_relays_chat);

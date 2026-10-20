@@ -49,6 +49,28 @@ bool host_ddial_display_view(const chat_history_entry_t *entry,
                                   &is_link, nullptr, handle, sizeof(handle),
                                   &body) &&
         !is_link && handle[0] != '\0' && body != nullptr) {
+        /* A DDial reply that joined a Chatter thread reads like a Chatter
+         * reply line: "->[r#5 #d12] oxy: text". */
+        uint64_t reply_id = 0U;
+        char parent_label[40];
+        size_t text_len = 0U;
+        char reply_label[32];
+        if (ddial_split_reply(body, &text_len, nullptr, nullptr, 0U,
+                              nullptr) &&
+            host_ddial_reply_link_get(entry->message_id, &reply_id,
+                                      parent_label, sizeof(parent_label)) &&
+            host_compact_id_encode(reply_id, reply_label,
+                                   sizeof(reply_label))) {
+            *scratch = *entry;
+            scratch->is_user_message = false;
+            snprintf(scratch->message, sizeof(scratch->message),
+                     "->[r#%s %s] %s: %.*s", reply_label, parent_label, handle,
+                     (int)text_len, body);
+            if (view != nullptr) {
+                *view = scratch;
+            }
+            return true;
+        }
         /* Same id, time and reactions; speaker and text taken from the line. */
         *scratch = *entry;
         scratch->is_user_message = true;
