@@ -105,6 +105,11 @@ bool host_compact_id_decode(const char *text, uint64_t *id_out)
            isspace((unsigned char)text[position]) != 0) {
         ++position;
     }
+    /* "d42" names a message relayed from DDial; the id itself is 42. */
+    if ((text[position] == 'd' || text[position] == 'D') &&
+        isdigit((unsigned char)text[position + 1U]) != 0) {
+        ++position;
+    }
 
     uint64_t base_value = 0U;
     bool saw_digit = false;

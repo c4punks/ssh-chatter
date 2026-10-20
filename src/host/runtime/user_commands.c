@@ -1070,7 +1070,7 @@ static void session_handle_ddial(session_ctx_t *ctx, const char *arguments)
                  relay->port);
         session_send_system_line(ctx, status);
         session_send_system_line(
-            ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status>");
+            ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status|key|hub>");
         return;
     }
 
@@ -1085,6 +1085,99 @@ static void session_handle_ddial(session_ctx_t *ctx, const char *arguments)
         !ctx->user.is_operator) {
         session_send_system_line(ctx, "Only operators can change the DDial "
                                       "relay connection.");
+        return;
+    }
+
+    /* Station hub: keys that let other stations link to this one. */
+    if (strcasecmp(action, "key") == 0 || strcasecmp(action, "hub") == 0) {
+        if (!ctx->user.is_operator) {
+            session_send_system_line(ctx, "Only operators can manage DDial "
+                                          "station links.");
+            return;
+        }
+        if (strcasecmp(action, "hub") == 0) {
+            char listing[SSH_CHATTER_MESSAGE_LIMIT * 2U];
+            size_t count =
+                host_ddial_hub_status(ctx->owner, listing, sizeof(listing));
+            const char *listen = getenv("CHATTER_DDIAL_HUB_LISTEN");
+            char header[SSH_CHATTER_MESSAGE_LIMIT];
+            snprintf(header, sizeof(header),
+                     "DDial station hub: %s | %zu linked station(s)",
+                     listen != nullptr && listen[0] != '\0'
+                         ? listen
+                         : "off (set CHATTER_DDIAL_HUB_LISTEN)",
+                     count);
+            session_send_system_line(ctx, header);
+            if (count > 0U) {
+                session_send_system_line(ctx, listing);
+            }
+            return;
+        }
+
+        char sub[16];
+        const char *key_rest = session_consume_token(rest, sub, sizeof(sub));
+        if (strcasecmp(sub, "new") == 0) {
+            char label[DDIAL_MAX_HANDLE_LEN] = "";
+            if (key_rest != nullptr) {
+                while (*key_rest == ' ' || *key_rest == '\t') {
+                    ++key_rest;
+                }
+                snprintf(label, sizeof(label), "%s", key_rest);
+                trim_whitespace_inplace(label);
+            }
+            if (label[0] == '\0') {
+                session_send_system_line(ctx,
+                                         "Usage: /ddial key new <station-name>");
+                return;
+            }
+            char key[DDIAL_STATION_KEY_LEN + 1U];
+            unsigned id = 0U;
+            if (!host_ddial_hub_key_create(ctx->owner, label, key, &id)) {
+                session_send_system_line(ctx,
+                                         "Could not create a station key.");
+                return;
+            }
+            char line[SSH_CHATTER_MESSAGE_LIMIT];
+            snprintf(line, sizeof(line),
+                     "Station key #%u for '%s': %s  (shown once -- give it to "
+                     "that station's operator; it is their link password)",
+                     id, label, key);
+            session_send_system_line(ctx, line);
+            memset(key, 0, sizeof(key));
+            return;
+        }
+        if (strcasecmp(sub, "list") == 0) {
+            char listing[SSH_CHATTER_MESSAGE_LIMIT * 2U];
+            size_t count =
+                host_ddial_hub_key_list(ctx->owner, listing, sizeof(listing));
+            if (count == 0U) {
+                session_send_system_line(ctx, "No station keys.");
+            } else {
+                session_send_system_line(ctx, listing);
+            }
+            return;
+        }
+        if (strcasecmp(sub, "revoke") == 0) {
+            char id_text[16];
+            (void)session_consume_token(key_rest, id_text, sizeof(id_text));
+            const char *digits = id_text[0] == '#' ? id_text + 1 : id_text;
+            char *end = nullptr;
+            unsigned long id = strtoul(digits, &end, 10);
+            if (digits[0] == '\0' || end == nullptr || *end != '\0' ||
+                id == 0UL || id > UINT_MAX) {
+                session_send_system_line(ctx, "Usage: /ddial key revoke <id>");
+                return;
+            }
+            session_send_system_line(
+                ctx, host_ddial_hub_key_revoke(ctx->owner, (unsigned)id)
+                         ? "Station key revoked; a station using it is "
+                           "disconnected."
+                         : "No station key with that id.");
+            return;
+        }
+        session_send_system_line(
+            ctx, "Usage: /ddial key <new <station-name>|list|revoke <id>> | "
+                 "/ddial hub");
         return;
     }
 

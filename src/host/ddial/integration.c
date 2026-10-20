@@ -36,9 +36,12 @@ static ddial_chat_link_entry_t *g_ddial_chat_links = nullptr;
 extern void ddial_session_write_raw(struct ddial_session *sess,
                                     const char *data, size_t len);
 
+/* ddial/hub.c: link lines held by stations linked to this one. */
+static bool ddial_hub_slot_in_use(uint16_t slot);
+
 /* Find the lowest wire-legal slot not already claimed by a real DDial
- * dial-in session or a linked chat-mode entry.  Caller must hold
- * g_ddial_registry_lock. */
+ * dial-in session, a linked chat-mode entry or a linked station.  Caller
+ * must hold g_ddial_registry_lock. */
 static uint16_t ddial_allocate_slot_locked(void)
 {
     uint16_t candidate = 1U;
@@ -65,6 +68,9 @@ static uint16_t ddial_allocate_slot_locked(void)
                     break;
                 }
             }
+        }
+        if (!used) {
+            used = ddial_hub_slot_in_use(candidate);
         }
         if (!used || candidate == UINT16_MAX) {
             break;
@@ -503,10 +509,13 @@ static uint16_t host_ddial_chat_link_slot_of(host_t *host,
 /* Build the "}}}-.<station>^#<slot>..." user broadcast list from the local
  * DDial session registry and send it upstream over the link.  Stations send
  * this list every 10-20 minutes so peers can track who is online. */
-bool host_ddial_client_send_station_broadcast(host_t *host)
+/* Build the }}} station broadcast (who is on this station), ready to
+ * send with its trailing CR/LF.  Returns its length, 0 on failure. */
+static size_t host_ddial_build_station_broadcast(host_t *host, char *list,
+                                                 size_t cap)
 {
-    if (host == nullptr) {
-        return false;
+    if (host == nullptr || list == nullptr || cap < 4U) {
+        return 0U;
     }
 
     const char *station_env = getenv("CHATTER_DDIAL_STATION");
@@ -518,9 +527,8 @@ bool host_ddial_client_send_station_broadcast(host_t *host)
         snprintf(station, sizeof(station), "%s", "Chatter");
     }
 
-    char list[SSH_CHATTER_MESSAGE_LIMIT];
-    if (!ddial_format_broadcast_header(list, sizeof(list), station, false)) {
-        return false;
+    if (!ddial_format_broadcast_header(list, cap, station, false)) {
+        return 0U;
     }
 
     size_t used = strlen(list);
@@ -544,7 +552,7 @@ bool host_ddial_client_send_station_broadcast(host_t *host)
             continue;
         }
         size_t entry_len = strlen(entry);
-        if (used + entry_len + 3U > sizeof(list)) {
+        if (used + entry_len + 3U > cap) {
             break;
         }
         memcpy(list + used, entry, entry_len);
@@ -565,7 +573,7 @@ bool host_ddial_client_send_station_broadcast(host_t *host)
             continue;
         }
         size_t entry_len = strlen(entry);
-        if (used + entry_len + 3U > sizeof(list)) {
+        if (used + entry_len + 3U > cap) {
             break;
         }
         memcpy(list + used, entry, entry_len);
@@ -576,7 +584,14 @@ bool host_ddial_client_send_station_broadcast(host_t *host)
     list[used++] = '\r';
     list[used++] = '\n';
     list[used] = '\0';
-    return host_ddial_client_send_raw(host, list, used);
+    return used;
+}
+
+bool host_ddial_client_send_station_broadcast(host_t *host)
+{
+    char list[SSH_CHATTER_MESSAGE_LIMIT];
+    size_t used = host_ddial_build_station_broadcast(host, list, sizeof(list));
+    return used > 0U && host_ddial_client_send_raw(host, list, used);
 }
 
 void host_ddial_write_who(ddial_session_t *target)

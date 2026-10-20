@@ -17,6 +17,9 @@
 #define DDIAL_MAX_BODY_LEN 255 /* spec: ddial message body limit */
 #define DDIAL_MAX_LINE_LEN 1024
 #define DDIAL_LINK_ESCAPE 0x7E /* '~' */
+/* Digits in a station link key (the password another station uses to
+ * join this one as a hub). */
+#define DDIAL_STATION_KEY_LEN 9U
 /* How often a linked station sends its }}} user broadcast list. */
 #define DDIAL_STATION_BROADCAST_INTERVAL_SEC (15 * 60)
 
@@ -174,6 +177,25 @@ size_t ddial_strip_ansi(const char *src, size_t src_len, char *dst,
 
 size_t ddial_filter_telnet_iac(const char *src, size_t src_len, char *dst,
                                size_t dst_cap);
+
+/* DDial-style reply: "text^ >>RE:[N] author: quote".
+ *
+ * ddial_format_reply_body() builds the chat body (at most
+ * DDIAL_MAX_BODY_LEN bytes); quoted_slot 0 leaves "[N]" out, and a quote
+ * that is itself a reply is reduced to its own text.  The reply text is
+ * kept whole where possible and the quote is clipped to fit.
+ *
+ * ddial_split_reply() finds the marker in a received body: *out_text_len
+ * is the length of the reply text before it, *out_quote points into body. */
+bool ddial_format_reply_body(char *dst, size_t dst_cap, const char *text,
+                             uint16_t quoted_slot, const char *author,
+                             const char *quote);
+bool ddial_split_reply(const char *body, size_t *out_text_len,
+                       uint16_t *out_quoted_slot, char *out_author,
+                       size_t author_cap, const char **out_quote);
+
+/* True for exactly DDIAL_STATION_KEY_LEN ASCII digits. */
+bool ddial_station_key_is_wellformed(const char *key);
 
 #ifdef __cplusplus
 }

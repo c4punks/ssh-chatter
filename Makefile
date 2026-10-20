@@ -162,7 +162,8 @@ DISPLAY_TEST_OBJ := $(patsubst %.c,$(BUILD_DIR)/%.o,$(DISPLAY_TEST_SRC))
 # Unit tests: tests/unit/test_<name>.c linked against the sources listed in
 # UNIT_DEPS_<name>. `make unit-test` builds and runs every one of them.
 UNIT_TEST_NAMES := translation_helpers user_data security_layer chardet \
-                   codepage jwt abstract_byte_buffer host_persistence
+                   codepage jwt abstract_byte_buffer host_persistence \
+                   ddial_protocol ddial_hub
 UNIT_TEST_BIN_DIR := $(BUILD_DIR)/unit
 UNIT_TEST_BINS := $(addprefix $(UNIT_TEST_BIN_DIR)/test_,$(UNIT_TEST_NAMES))
 UNIT_TEST_COMMON_SRC := src/memory_manager.c
@@ -176,6 +177,9 @@ UNIT_DEPS_abstract_byte_buffer :=
 # Includes host_aggregate.c itself, so it links everything else but main.
 UNIT_DEPS_host_persistence := $(filter-out src/host_aggregate.c src/main.c \
                                 $(UNIT_TEST_COMMON_SRC),$(SRC))
+UNIT_DEPS_ddial_hub := $(UNIT_DEPS_host_persistence)
+# test_ddial_protocol.c #includes protocol.c (it is part of the aggregate).
+UNIT_DEPS_ddial_protocol :=
 DEP += $(patsubst %.c,$(BUILD_DIR)/%.d,$(wildcard tests/unit/*.c))
 unit_test_objs = $(patsubst %.c,$(BUILD_DIR)/%.o,$(1))
 

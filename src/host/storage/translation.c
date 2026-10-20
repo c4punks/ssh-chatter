@@ -128,6 +128,7 @@ typedef struct translation_job {
         struct {
             uint64_t message_id;
             bool backfill;
+            char id_label[32]; /* "42", or "d42" for a DDial line */
             char name[SSH_CHATTER_USERNAME_LEN];
             char text[SSH_CHATTER_MESSAGE_LIMIT];
         } chat;
@@ -155,6 +156,7 @@ typedef struct translation_result {
     uint64_t generation;
     uint64_t message_id;
     bool backfill;
+    char chat_id_label[32];
     char chat_name[SSH_CHATTER_USERNAME_LEN];
     uint64_t post_id;
     uint64_t fingerprint;
@@ -850,6 +852,8 @@ static bool session_translation_queue_chat_entry(
              ctx->output_translation_language);
     job->data.chat.message_id = view->message_id;
     job->data.chat.backfill = backfill;
+    (void)host_history_id_label(entry, job->data.chat.id_label,
+                                sizeof(job->data.chat.id_label));
     snprintf(job->data.chat.name, sizeof(job->data.chat.name), "%s",
              chat_history_entry_display_name(view));
     snprintf(job->data.chat.text, sizeof(job->data.chat.text), "%s",
@@ -1437,8 +1441,10 @@ static void session_translation_apply_chat_result(session_ctx_t *ctx,
     prefix[0] = '\0';
     if (!adjacent) {
         char id_label[32];
-        if (!host_compact_id_encode(ready->message_id, id_label,
-                                    sizeof(id_label))) {
+        if (ready->chat_id_label[0] != '\0') {
+            snprintf(id_label, sizeof(id_label), "%s", ready->chat_id_label);
+        } else if (!host_compact_id_encode(ready->message_id, id_label,
+                                           sizeof(id_label))) {
             snprintf(id_label, sizeof(id_label), "-");
         }
         snprintf(prefix, sizeof(prefix), ANSI_CYAN "[%s]" ANSI_RESET " <%s> ",
@@ -2528,6 +2534,8 @@ static void session_translation_process_chat_batch(session_ctx_t *ctx,
             result->generation = jobs[idx]->generation;
             result->message_id = jobs[idx]->data.chat.message_id;
             result->backfill = jobs[idx]->data.chat.backfill;
+            snprintf(result->chat_id_label, sizeof(result->chat_id_label),
+                     "%s", jobs[idx]->data.chat.id_label);
             snprintf(result->chat_name, sizeof(result->chat_name), "%s",
                      jobs[idx]->data.chat.name);
             result->success = segments[idx].output != nullptr;

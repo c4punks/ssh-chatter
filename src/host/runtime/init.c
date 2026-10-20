@@ -626,6 +626,7 @@ void host_init(host_t *host, auth_profile_t *auth)
     host_rss_start_backend(host);
     host_runtime_settings_load(host);
     host_ddial_client_start(host);
+    host_ddial_hub_start(host);
     sshc_memory_context_pop(memory_scope);
 }
 

@@ -79,6 +79,10 @@ static void session_handle_reply(session_ctx_t *ctx, const char *arguments)
     uint64_t parent_reply_id = 0U;
     uint64_t parent_message_id = 0U;
     char parent_author[DDIAL_MAX_HANDLE_LEN] = "";
+    /* What DDial needs to show this as a reply: the parent's text and its
+     * author's line number (0 when the author has none). */
+    char parent_text[SSH_CHATTER_MESSAGE_LIMIT] = "";
+    uint16_t parent_slot = 0U;
 
     if (targeting_reply) {
         if (!host_replies_find_entry_by_id(ctx->owner, identifier,
@@ -97,19 +101,26 @@ static void session_handle_reply(session_ctx_t *ctx, const char *arguments)
         parent_reply_id = parent_reply.reply_id;
         snprintf(parent_author, sizeof(parent_author), "%s",
                  parent_reply.username);
+        snprintf(parent_text, sizeof(parent_text), "%s", parent_reply.message);
     } else {
         chat_history_entry_t parent_entry = {0};
         if (host_history_find_entry_by_id(ctx->owner, identifier,
                                           &parent_entry)) {
             parent_message_id = parent_entry.message_id;
+            const char *ddial_body = nullptr;
             if (parent_entry.username[0] != '\0') {
                 snprintf(parent_author, sizeof(parent_author), "%s",
                          parent_entry.username);
-            } else {
-                /* A relayed DDial line: take the handle from its wire form. */
-                (void)ddial_parse_incoming_chat(
-                    parent_entry.message, nullptr, nullptr, nullptr, nullptr,
-                    nullptr, parent_author, sizeof(parent_author), nullptr);
+                snprintf(parent_text, sizeof(parent_text), "%s",
+                         parent_entry.message);
+            } else if (ddial_parse_incoming_chat(
+                           parent_entry.message, nullptr, &parent_slot,
+                           nullptr, nullptr, nullptr, parent_author,
+                           sizeof(parent_author), &ddial_body) &&
+                       ddial_body != nullptr) {
+                /* A relayed DDial line: speaker, line number and text come
+                 * from its wire form. */
+                snprintf(parent_text, sizeof(parent_text), "%s", ddial_body);
             }
         } else if (host_replies_find_entry_by_id(ctx->owner, identifier,
                                                  &parent_reply)) {
@@ -117,6 +128,8 @@ static void session_handle_reply(session_ctx_t *ctx, const char *arguments)
             parent_reply_id = parent_reply.reply_id;
             snprintf(parent_author, sizeof(parent_author), "%s",
                      parent_reply.username);
+            snprintf(parent_text, sizeof(parent_text), "%s",
+                     parent_reply.message);
         } else {
             char message[SSH_CHATTER_MESSAGE_LIMIT];
             char label[32];
@@ -218,15 +231,33 @@ static void session_handle_reply(session_ctx_t *ctx, const char *arguments)
     // Broadcast the reply entry to all users so it appears in chat buffer
     chat_room_broadcast_entry(&ctx->owner->room, &reply_entry, ctx);
 
-    // DDial has no replies: relay it the way public chat is relayed, as a
-    // plain line that @mentions the parent's author.
+    // Relay to DDial in its reply form, "text^ >>RE:[N] author: quote",
+    // which DDial clients show as a reply to the quoted line.  A Chatter
+    // author speaks from its chat-link line number when it has one.  If the
+    // quote cannot go out (DDial is ASCII-only) fall back to an @mention.
     char ddial_text[SSH_CHATTER_MESSAGE_LIMIT];
-    if (parent_author[0] != '\0' &&
-        strcasecmp(parent_author, ctx->user.name) != 0) {
-        snprintf(ddial_text, sizeof(ddial_text), "@%s %s", parent_author,
-                 stored.message);
-    } else {
-        snprintf(ddial_text, sizeof(ddial_text), "%s", stored.message);
+    if (parent_slot == 0U && parent_author[0] != '\0') {
+        parent_slot = host_ddial_chat_link_slot_of(ctx->owner, parent_author);
+    }
+    bool quote_is_ascii = parent_text[0] != '\0';
+    for (const unsigned char *q = (const unsigned char *)parent_text;
+         *q != '\0'; ++q) {
+        if (*q >= 0x80U) {
+            quote_is_ascii = false;
+            break;
+        }
+    }
+    if (!(parent_author[0] != '\0' && quote_is_ascii &&
+          ddial_format_reply_body(ddial_text, sizeof(ddial_text),
+                                  stored.message, parent_slot, parent_author,
+                                  parent_text))) {
+        if (parent_author[0] != '\0' &&
+            strcasecmp(parent_author, ctx->user.name) != 0) {
+            snprintf(ddial_text, sizeof(ddial_text), "@%s %s", parent_author,
+                     stored.message);
+        } else {
+            snprintf(ddial_text, sizeof(ddial_text), "%s", stored.message);
+        }
     }
     host_ddial_client_send(ctx->owner, ctx->user.name, ddial_text);
     host_ddial_inject_message(ctx->owner, ctx->user.name, ddial_text);
