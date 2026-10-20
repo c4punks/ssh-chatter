@@ -1,11 +1,13 @@
 # DDial in SSH-Chatter
 
-SSH-Chatter speaks the Diversi Dial (DDial) line protocol in two directions:
+SSH-Chatter speaks the Diversi Dial (DDial) line protocol in three ways:
 
 - **Listener** (`-D bind:port`): retro terminals dial in over raw TCP/telnet
   and get a DDial-style chat with the MagViz command set.
 - **Upstream client** (`CHATTER_DDIAL_HOST`/`PORT`): Chatter connects out to
   another DDial station and bridges it with the Chatter room.
+- **Station hub** (`CHATTER_DDIAL_HUB_LISTEN`): other stations link to this
+  one with a station key generated here. See [Station hub](#station-hub).
 
 Channel 1 is one conversation across all three: the Chatter room (SSH and
 telnet users), local dial-ins tuned to T1, and the upstream station.
@@ -103,3 +105,72 @@ Notes:
   `/image` (AI image generation) is not available.
 - CoSysops are set with `CHATTER_DDIAL_COSYSOPS=1,7,...` (member numbers) or
   by another CoSysop with `/sc+#`.
+
+## Message ids and replies
+
+Chat that arrives from DDial (the upstream station, linked stations and
+local dial-ins) gets a message id like any Chatter message, shown with a `d`
+in front: `[d42] <MaxMouse> hello`. The number shares Chatter's id sequence,
+so `d42` and `42` can never both exist; commands accept either spelling
+(`/reply d42 hi`, reactions, and so on).
+
+A `/reply` is relayed to DDial in the reply form DDial clients understand:
+
+    text^ >>RE:[N] author: quoted text
+
+`^` is the DDial line break, `N` is the quoted author's line number (left
+out when they have none), and the quote is the parent's own text without
+any `>>RE:` tail of its own. The body is capped at 255 characters: the
+reply text is kept and the quote is clipped. DDial is ASCII-only, so a reply
+to a message with non-ASCII text falls back to the older `@author text`
+form (and, like any chat, a reply that is itself non-ASCII is not relayed).
+
+## Station hub
+
+Other stations can link to this one, the same way this station links to
+its own upstream hub:
+
+| Variable | Meaning |
+| --- | --- |
+| `CHATTER_DDIAL_HUB_LISTEN` | `port` or `addr:port` (`[v6addr]:port`) to accept station links on. Unset = off. |
+| `CHATTER_DDIAL_STATION` | Name shown in the welcome line and the `}}}` user list. |
+
+Operators manage keys from the Chatter room:
+
+- `/ddial key new <station-name>` prints a new nine-digit station key.
+  **It is shown once.** Give it to that station's operator; it is their
+  link password (`CHATTER_DDIAL_KEY` on another ssh-chatter).
+- `/ddial key list` shows each key's id, name, creation date and last use.
+- `/ddial key revoke <id>` deletes a key and drops a station linked with it.
+  Ids are never reused.
+- `/ddial hub` lists the linked stations.
+
+Keys are stored as PBKDF2-SHA256 hashes in `ddial_station_keys.tsv` next to
+the member files (mode 0600).
+
+The join sequence is the upstream login run in reverse:
+
+1. The station connects and gets `Enter Password or [RETURN]: `.
+2. It sends its key. A wrong key gets `Invalid password` after a short delay
+   and the connection is closed; five bad keys from one address within ten
+   minutes block that address for the rest of the window. One key holds one
+   link at a time.
+3. A good key gets `Welcome to <station> station link`, the status line
+   ` #<line>(T1:?)` that names the station's link line (60 and up), the
+   `-->` prompt, and our `}}}` user list (repeated every 15 minutes).
+4. The station sets its name with `/H<name>` and speaks the link wire forms.
+
+What flows where:
+
+- Chat from a station's users is shown and stored with the station's link
+  line in front (`60#4[T1:Bob) hi`), the same way chat relayed by our own
+  upstream hub is. It reaches the room, local dial-ins and the other linked
+  stations, and AI members answer it.
+- `/P<line>` private messages and `/E~` link e-mail from a station are
+  delivered to this station's users.
+- Linked stations get everything this station sends its own upstream:
+  public chat from Chatter members, dial-ins and AI members, login and
+  logout events, the `}}}` list, and chat relayed down from our upstream.
+- Traffic from linked stations is **not** passed up to our own upstream hub.
+- Login/logout events and user lists sent by a linked station number lines
+  on that station, so they are not replayed here.
