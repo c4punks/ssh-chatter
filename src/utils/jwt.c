@@ -70,10 +70,19 @@ static unsigned char *base64url_decode(const char *input, size_t *out_len) {
     // Temporarily handle input as if it were padded
     // We iterate over the input string
     while (i < len) {
-        sextet_a = i < len ? (uint32_t)values[(unsigned char)input[i++]] : 0;
-        sextet_b = i < len ? (uint32_t)values[(unsigned char)input[i++]] : 0;
-        sextet_c = i < len ? (uint32_t)values[(unsigned char)input[i++]] : 0;
-        sextet_d = i < len ? (uint32_t)values[(unsigned char)input[i++]] : 0;
+        int raw[4] = {0, 0, 0, 0};
+        for (int k = 0; k < 4 && i < len; ++k) {
+            raw[k] = values[(unsigned char)input[i++]];
+            if (raw[k] < 0) {
+                /* Not a base64url character: reject the whole input. */
+                sshc_gc_free(output);
+                return nullptr;
+            }
+        }
+        sextet_a = (uint32_t)raw[0];
+        sextet_b = (uint32_t)raw[1];
+        sextet_c = (uint32_t)raw[2];
+        sextet_d = (uint32_t)raw[3];
 
         uint32_t triple = (sextet_a << 18) + (sextet_b << 12) + (sextet_c << 6) + sextet_d;
 
@@ -94,6 +103,8 @@ static unsigned char *base64url_decode(const char *input, size_t *out_len) {
     // If we overshoot, we just cap `j`.
     // Correct approach for `out_len`:
     *out_len = (len * 3) / 4;
+    /* Callers parse the payload with strstr(), so it must be a C string. */
+    output[*out_len] = '\0';
     // If padding was needed (len % 4 != 0), the integer division truncates correctly for base64url usually?
     // No, 2 chars (12 bits) -> 1 byte (8 bits) + 4 spare.
     // 3 chars (18 bits) -> 2 bytes (16 bits) + 2 spare.
