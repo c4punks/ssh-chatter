@@ -695,16 +695,51 @@ session_codepage_t session_codepage_detect_auto(const unsigned char *input,
     }
 #endif
 
-    /* Simple heuristics without uchardet */
-    bool has_kr = false, has_jp = false, has_cn = false;
-    for (size_t j = 0; j < input_length; ++j) {
-        if (input[j] >= 0xB0 && input[j] <= 0xC8) has_kr = true;
-        if (input[j] >= 0x81 && input[j] <= 0x9F) has_jp = true;
-        if (input[j] >= 0xA1 && input[j] <= 0xF7) has_cn = true;
+    /*
+     * Simple heuristics without uchardet. Classify each double-byte pair
+     * instead of single bytes: the EUC-KR Hangul lead range (0xB0-0xC8)
+     * lies inside the GB2312 lead range (0xA1-0xF7), so per-byte range
+     * flags could never report CP949 on their own.
+     *   kr: EUC-KR Hangul syllable  (lead 0xB0-0xC8, trail 0xA1-0xFE)
+     *   cn: other EUC-style pair    (lead 0xA1-0xF7, trail 0xA1-0xFE)
+     *   jp: Shift-JIS pair          (lead 0x81-0x9F/0xE0-0xEF,
+     *                                trail 0x40-0x7E/0x80-0xFC)
+     * Chinese text also uses 0xB0-0xC8 leads, so kr mixed with cn means
+     * CP936; anything mixed with jp is ambiguous.
+     */
+    size_t kr_pairs = 0U, jp_pairs = 0U, cn_pairs = 0U;
+    for (size_t j = 0; j < input_length;) {
+        const unsigned char lead = input[j];
+        if (lead < 0x80U) {
+            ++j;
+            continue;
+        }
+        if (j + 1U >= input_length) {
+            break;
+        }
+        const unsigned char trail = input[j + 1U];
+        const bool euc_trail = trail >= 0xA1U && trail <= 0xFEU;
+        const bool sjis_lead = (lead >= 0x81U && lead <= 0x9FU) ||
+                               (lead >= 0xE0U && lead <= 0xEFU);
+        const bool sjis_trail = (trail >= 0x40U && trail <= 0x7EU) ||
+                                (trail >= 0x80U && trail <= 0xFCU);
+        if (lead >= 0xB0U && lead <= 0xC8U && euc_trail) {
+            ++kr_pairs;
+        } else if (lead >= 0xA1U && lead <= 0xF7U && euc_trail) {
+            ++cn_pairs;
+        } else if (sjis_lead && sjis_trail) {
+            ++jp_pairs;
+        } else {
+            ++j;
+            continue;
+        }
+        j += 2U;
     }
-    if (has_kr && !has_jp && !has_cn) return SESSION_CODEPAGE_CP949;
-    if (has_jp && !has_kr && !has_cn) return SESSION_CODEPAGE_CP932;
-    if (has_cn && !has_kr && !has_jp) return SESSION_CODEPAGE_CP936;
+    if (kr_pairs > 0U && cn_pairs == 0U && jp_pairs == 0U)
+        return SESSION_CODEPAGE_CP949;
+    if (jp_pairs > 0U && kr_pairs == 0U && cn_pairs == 0U)
+        return SESSION_CODEPAGE_CP932;
+    if (cn_pairs > 0U && jp_pairs == 0U) return SESSION_CODEPAGE_CP936;
     return SESSION_CODEPAGE_UTF8;
 }
 
