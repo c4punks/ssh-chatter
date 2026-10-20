@@ -612,13 +612,11 @@ static void host_state_load(host_t *host)
     }
 
     /*
-     * NOTE: clamping here means extra preference records are left unread,
-     * so a file holding more than SSH_CHATTER_MAX_PREFERENCES entries would
-     * make the grant section below start at the wrong offset.
+     * preference_count is deliberately not clamped: every record must be
+     * consumed so the grant section starts at the right offset. Records
+     * beyond SSH_CHATTER_MAX_PREFERENCES are read and then dropped by
+     * host_state_apply_preference_entry().
      */
-    if (preference_count > SSH_CHATTER_MAX_PREFERENCES) {
-        preference_count = SSH_CHATTER_MAX_PREFERENCES;
-    }
 
     ttak_mutex_lock(&host->lock);
 
