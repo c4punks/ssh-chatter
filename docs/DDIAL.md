@@ -125,6 +125,28 @@ reply text is kept and the quote is clipped. DDial is ASCII-only, so a reply
 to a message with non-ASCII text falls back to the older `@author text`
 form (and, like any chat, a reply that is itself non-ASCII is not relayed).
 
+### Replies arriving from DDial
+
+A DDial line in that reply form joins Chatter's reply threads. The quoted
+line is looked up among the last 600 history entries by author and quote
+(the quote may be clipped, with or without a trailing `...`; `[N]` picks
+between candidates). It can be a Chatter message, a DDial line or a
+Chatter reply. The DDial line then:
+
+- is recorded as a Chatter reply (threaded under a reply when it answers
+  one) and shows up in that message's reply tree;
+- is shown like Chatter's own replies: `->[r#5 #d12] oxyosbourne: text`;
+- can be answered with `/reply r5 ...` (or still `/reply d<id> ...`).
+
+The quote forms `[N] author: quote`, `author: quote`, `[] author: quote`
+and `#N[T1:author) quote` are understood. Quotes of lines that are not
+messages (DJ announcements, `/a` actions) stay plain lines.
+
+The link between a DDial line and its reply is rebuilt at every start by
+running the same matching over loaded history; it is idempotent, which is
+also how history from before this feature was brought in. When the reply
+table is full (1024), the oldest reply is dropped to make room.
+
 ## Station hub
 
 Other stations can link to this one, the same way this station links to
