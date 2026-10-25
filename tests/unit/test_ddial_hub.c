@@ -492,6 +492,159 @@ TEST(station_links_with_key_and_relays_chat)
     host_ddial_hub_stop(g_host);
 }
 
+/* ---- Scrollback blank/noise entry skipping ---- */
+
+TEST(scrollback_entry_visibility_check)
+{
+    session_ctx_t ctx = {0};
+    ctx.owner = g_host;
+
+    chat_history_entry_t empty = {0};
+    CHECK(!session_scrollback_entry_is_visible(&ctx, &empty));
+
+    chat_history_entry_t noise = {0};
+    snprintf(noise.message, sizeof(noise.message), "%s",
+             "[LINK] -->. +^#5[T1:Bob");
+    CHECK(!session_scrollback_entry_is_visible(&ctx, &noise));
+
+    chat_history_entry_t user_msg = {0};
+    user_msg.is_user_message = true;
+    snprintf(user_msg.username, sizeof(user_msg.username), "alice");
+    snprintf(user_msg.message, sizeof(user_msg.message), "hello world");
+    CHECK(session_scrollback_entry_is_visible(&ctx, &user_msg));
+
+    chat_history_entry_t ddial_chat = {0};
+    snprintf(ddial_chat.message, sizeof(ddial_chat.message), "%s",
+             "71#4[T1:MaxMouse) hello there");
+    CHECK(session_scrollback_entry_is_visible(&ctx, &ddial_chat));
+}
+
+TEST(scrollback_skips_consecutive_noise_entries)
+{
+    host_t *host = new_host();
+    CHECK(host != NULL);
+
+    session_ctx_t ctx = {0};
+    ctx.owner = host;
+
+    chat_history_entry_t entry1 = {0};
+    entry1.is_user_message = true;
+    snprintf(entry1.username, sizeof(entry1.username), "alice");
+    snprintf(entry1.message, sizeof(entry1.message), "visible first");
+    chat_history_entry_t stored = {0};
+    CHECK(host_history_commit_entry(host, &entry1, &stored));
+    size_t first_idx = host->history_total - 1U;
+
+    /* Add 50 noise lines */
+    for (int i = 0; i < 50; ++i) {
+        chat_history_entry_t noise = {0};
+        snprintf(noise.message, sizeof(noise.message), "[LINK] noise keepalive");
+        (void)host_history_commit_entry(host, &noise, &stored);
+    }
+
+    chat_history_entry_t entry2 = {0};
+    entry2.is_user_message = true;
+    snprintf(entry2.username, sizeof(entry2.username), "bob");
+    snprintf(entry2.message, sizeof(entry2.message), "visible second");
+    CHECK(host_history_commit_entry(host, &entry2, &stored));
+    size_t second_idx = host->history_total - 1U;
+
+    CHECK_EQ(second_idx - first_idx, 51U);
+
+    size_t prev_idx = 0U;
+    CHECK(session_scrollback_find_prev_visible(&ctx, second_idx, &prev_idx));
+    CHECK_EQ(prev_idx, second_idx);
+
+    CHECK(session_scrollback_find_prev_visible(&ctx, second_idx - 1U, &prev_idx));
+    CHECK_EQ(prev_idx, first_idx);
+
+    size_t step_idx = 0U;
+    bool reached_boundary = false;
+    CHECK(session_scrollback_step_visible(&ctx, second_idx, 1, 1, &step_idx,
+                                         &reached_boundary));
+    CHECK_EQ(step_idx, first_idx);
+    CHECK(!reached_boundary);
+
+    /* Stepping backwards from first_idx fails because it is the oldest */
+    CHECK(!session_scrollback_step_visible(&ctx, first_idx, 1, 1, &step_idx,
+                                          &reached_boundary));
+    CHECK(reached_boundary);
+
+    /* Stepping more visible messages than exist reaches boundary */
+    CHECK(session_scrollback_step_visible(&ctx, second_idx, 1, 5, &step_idx,
+                                         &reached_boundary));
+    CHECK_EQ(step_idx, first_idx);
+    CHECK(reached_boundary);
+
+    /* Collect visible entries ending at second_idx */
+    chat_history_entry_t buf[10];
+    size_t indices[10];
+    size_t collected = session_scrollback_collect_visible(
+        &ctx, second_idx, 10, buf, indices, 10);
+    CHECK_EQ(collected, 2U);
+    CHECK_EQ(indices[0], first_idx);
+    CHECK_EQ(indices[1], second_idx);
+    CHECK_STR_EQ(buf[0].message, "visible first");
+    CHECK_STR_EQ(buf[1].message, "visible second");
+
+    free(host);
+}
+
+TEST(scrollback_navigate_skips_noise_and_never_blanks)
+{
+    host_t *host = new_host();
+    CHECK(host != NULL);
+
+    chat_history_entry_t stored = {0};
+    chat_history_entry_t entry1 = {0};
+    entry1.is_user_message = true;
+    snprintf(entry1.username, sizeof(entry1.username), "alice");
+    snprintf(entry1.message, sizeof(entry1.message), "visible first");
+    CHECK(host_history_commit_entry(host, &entry1, &stored));
+
+    for (int i = 0; i < 50; ++i) {
+        chat_history_entry_t noise = {0};
+        snprintf(noise.message, sizeof(noise.message), "[LINK] noise keepalive");
+        (void)host_history_commit_entry(host, &noise, &stored);
+    }
+
+    chat_history_entry_t entry2 = {0};
+    entry2.is_user_message = true;
+    snprintf(entry2.username, sizeof(entry2.username), "bob");
+    snprintf(entry2.message, sizeof(entry2.message), "visible second");
+    CHECK(host_history_commit_entry(host, &entry2, &stored));
+
+    int pipefd[2];
+    CHECK_EQ(pipe(pipefd), 0);
+
+    session_ctx_t ctx = {0};
+    ctx.transport_kind = SESSION_TRANSPORT_TELNET;
+    ctx.telnet_fd = pipefd[1];
+    ctx.owner = host;
+    ctx.terminal_width = 80;
+    ctx.terminal_height = 24;
+
+    size_t total = host_history_total(host);
+    size_t latest_vis = 0U;
+    CHECK(session_scrollback_find_prev_visible(&ctx, total - 1U, &latest_vis));
+
+    /* Navigate back 1 visible message */
+    session_scrollback_navigate_line(&ctx, 1);
+    CHECK(ctx.history_scroll_position > 0U);
+    size_t expected_anchor = 0U;
+    CHECK(session_scrollback_step_visible(&ctx, latest_vis, 1, 1,
+                                         &expected_anchor, nullptr));
+    CHECK_EQ(ctx.history_scroll_position, total - 1U - expected_anchor);
+
+    /* Navigate forward 1 visible message returns to live tail */
+    session_scrollback_navigate_line(&ctx, -1);
+    CHECK_EQ(ctx.history_scroll_position, 0U);
+
+    close(pipefd[0]);
+    close(pipefd[1]);
+    free(host);
+}
+
 static void remove_dir_files(const char *dir)
 {
     char path[PATH_MAX];
@@ -524,6 +677,9 @@ int main(void)
     RUN_TEST(station_key_create_match_revoke);
     RUN_TEST(failed_logins_block_an_address);
     RUN_TEST(station_links_with_key_and_relays_chat);
+    RUN_TEST(scrollback_entry_visibility_check);
+    RUN_TEST(scrollback_skips_consecutive_noise_entries);
+    RUN_TEST(scrollback_navigate_skips_noise_and_never_blanks);
 
     remove_dir_files(g_dir);
     return TEST_REPORT();
