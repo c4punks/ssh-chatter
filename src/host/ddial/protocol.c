@@ -987,8 +987,15 @@ bool ddial_split_reply(const char *body, size_t *out_text_len,
     const char *p = marker + sizeof(DDIAL_REPLY_MARKER) - 1U;
     uint16_t slot = 0U;
     /* Some clients quote the speaker in wire form instead:
-     * ">>RE:#1[T1:MerZz) quote" (optionally "~#..."). */
+     * ">>RE:#1[T1:MerZz) quote" (optionally "~#..." or with link slot "65#1..."). */
     const char *wire = *p == (char)DDIAL_LINK_ESCAPE ? p + 1 : p;
+    const char *wire_scan = wire;
+    while (isdigit((unsigned char)*wire_scan)) {
+        ++wire_scan;
+    }
+    if (*wire_scan == '#') {
+        wire = wire_scan;
+    }
     if (*wire == '#') {
         char handle[DDIAL_MAX_HANDLE_LEN];
         uint16_t wire_slot = 0U;
@@ -1203,6 +1210,49 @@ static size_t ddial_reply_fold_space(const char *src, size_t src_len, char *dst,
     return j;
 }
 
+static bool ddial_reply_quote_match_internal(const char *parent, size_t plen,
+                                             const char *wanted, size_t qlen)
+{
+    char pbuf[SSH_CHATTER_DDIAL_FOLD_CAP];
+    char wbuf[SSH_CHATTER_DDIAL_FOLD_CAP];
+    if (plen >= sizeof(pbuf) || qlen >= sizeof(wbuf)) {
+        return false;
+    }
+    memcpy(pbuf, parent, plen);
+    pbuf[plen] = '\0';
+    memcpy(wbuf, wanted, qlen);
+    wbuf[qlen] = '\0';
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        if (attempt == 1) {
+            /* A clipped quote may end in an ellipsis: drop it and retry. */
+            if (qlen < 3U || strcmp(wbuf + qlen - 3U, "...") != 0) {
+                break;
+            }
+            while (qlen > 0U && wbuf[qlen - 1U] == '.') {
+                wbuf[--qlen] = '\0';
+            }
+            while (qlen > 0U && wbuf[qlen - 1U] == ' ') {
+                wbuf[--qlen] = '\0';
+            }
+        }
+        if (qlen == 0U || plen == 0U || qlen > plen) {
+            continue;
+        }
+        /* Very short quotes must match whole; longer ones may be clipped. */
+        if (qlen < 4U) {
+            if (qlen == plen && strcmp(pbuf, wbuf) == 0) {
+                return true;
+            }
+            continue;
+        }
+        if (strncmp(pbuf, wbuf, qlen) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ddial_reply_quote_matches(const char *parent_text, const char *quote)
 {
     if (parent_text == nullptr || quote == nullptr) {
@@ -1220,33 +1270,48 @@ bool ddial_reply_quote_matches(const char *parent_text, const char *quote)
                                          sizeof(parent));
     size_t qlen = ddial_reply_fold_space(quote, strlen(quote), wanted,
                                          sizeof(wanted));
-    for (int attempt = 0; attempt < 2; ++attempt) {
-        if (attempt == 1) {
-            /* A clipped quote may end in an ellipsis: drop it and retry. */
-            if (qlen < 3U || strcmp(wanted + qlen - 3U, "...") != 0) {
-                break;
-            }
-            while (qlen > 0U && wanted[qlen - 1U] == '.') {
-                wanted[--qlen] = '\0';
-            }
-            while (qlen > 0U && wanted[qlen - 1U] == ' ') {
-                wanted[--qlen] = '\0';
-            }
-        }
-        if (qlen == 0U || plen == 0U || qlen > plen) {
-            continue;
-        }
-        /* Very short quotes must match whole; longer ones may be clipped. */
-        if (qlen < 4U) {
-            if (qlen == plen && strcmp(parent, wanted) == 0) {
-                return true;
-            }
-            continue;
-        }
-        if (strncmp(parent, wanted, qlen) == 0) {
+
+    if (ddial_reply_quote_match_internal(parent, plen, wanted, qlen)) {
+        return true;
+    }
+
+    /* Emote handling: if parent was an action/emote like "*is reading changelog*",
+     * leading and trailing asterisks may have been omitted in the quote. */
+    const char *p_strip = parent;
+    size_t p_len = plen;
+    while (p_len > 0U && *p_strip == '*') {
+        ++p_strip;
+        --p_len;
+    }
+    while (p_len > 0U && (p_strip[p_len - 1U] == '*' || p_strip[p_len - 1U] == ' ')) {
+        --p_len;
+    }
+    while (p_len > 0U && *p_strip == ' ') {
+        ++p_strip;
+        --p_len;
+    }
+
+    const char *q_strip = wanted;
+    size_t q_len = qlen;
+    while (q_len > 0U && *q_strip == '*') {
+        ++q_strip;
+        --q_len;
+    }
+    while (q_len > 0U && (q_strip[q_len - 1U] == '*' || q_strip[q_len - 1U] == ' ')) {
+        --q_len;
+    }
+    while (q_len > 0U && *q_strip == ' ') {
+        ++q_strip;
+        --q_len;
+    }
+
+    if ((p_strip != parent || q_strip != wanted || p_len != plen || q_len != qlen) &&
+        p_len > 0U && q_len > 0U) {
+        if (ddial_reply_quote_match_internal(p_strip, p_len, q_strip, q_len)) {
             return true;
         }
     }
+
     return false;
 }
 

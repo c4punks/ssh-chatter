@@ -187,6 +187,31 @@ TEST(ddial_reply_to_ddial_line_becomes_a_reply)
     CHECK_EQ(threaded.parent_reply_id, reply_id);
     snprintf(expected, sizeof(expected), "r#%s", reply_label);
     CHECK_STR_EQ(label, expected);
+
+    /* A reply quoting an emote/action line without asterisks. */
+    chat_history_entry_t emote_parent = commit_system(
+        "65#5[T1:Stern) *is reading the changelog now to catch up*");
+    chat_history_entry_t emote_reply = commit_system(
+        "65#3[T1:shark) you've got a few months of scrollback ....^ "
+        ">>RE:[5] Stern: is reading the changelog now to catch up");
+    uint64_t emote_reply_id = 0U;
+    CHECK(host_ddial_reply_link_get(emote_reply.message_id, &emote_reply_id,
+                                    label, sizeof(label)));
+    chat_reply_entry_t emote_entry = {0};
+    CHECK(host_replies_find_entry_by_id(g_host, emote_reply_id, &emote_entry));
+    CHECK_EQ(emote_entry.parent_message_id, emote_parent.message_id);
+    CHECK_STR_EQ(emote_entry.username, "shark");
+
+    /* A reply quoting wire form with link-slot prefix e.g. 65#1[T1:... */
+    chat_history_entry_t wire_reply = commit_system(
+        "#11<T1:Marc) tritips?^ >>RE:65#1[T1:MerZz) nope. here is the article on it");
+    uint64_t wire_reply_id = 0U;
+    CHECK(host_ddial_reply_link_get(wire_reply.message_id, &wire_reply_id,
+                                    label, sizeof(label)));
+    chat_reply_entry_t wire_entry = {0};
+    CHECK(host_replies_find_entry_by_id(g_host, wire_reply_id, &wire_entry));
+    CHECK_EQ(wire_entry.parent_message_id, parent.message_id);
+    CHECK_STR_EQ(wire_entry.username, "Marc");
 }
 
 TEST(ddial_reply_to_chatter_message_and_chatter_reply)
