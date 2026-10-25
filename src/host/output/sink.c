@@ -246,7 +246,27 @@ void session_scrollback_reset_position(session_ctx_t *ctx)
  * @param ctx Session context to process pending sink state for.
  * @return None.
  */
+static void session_process_pending_sink_locked(session_ctx_t *ctx);
+
 void session_process_pending_sink(session_ctx_t *ctx)
+{
+    if (ctx == nullptr) {
+        return;
+    }
+
+    /* Broadcasts from other sessions' threads run this under the output
+     * lock while the session's own thread also calls it; unlocked, one run
+     * rewinds the shared output buffer (buffer_mark) over lines the other
+     * just rendered, and those lines are lost though the sink cursor has
+     * already moved past them. The lock is recursive. */
+    const bool locked = session_output_lock(ctx);
+    session_process_pending_sink_locked(ctx);
+    if (locked) {
+        session_output_unlock(ctx);
+    }
+}
+
+static void session_process_pending_sink_locked(session_ctx_t *ctx)
 {
     if (ctx == nullptr || ctx->owner == nullptr || !ctx->pending_should_sink) {
         return;

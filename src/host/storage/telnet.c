@@ -1218,6 +1218,76 @@ static bool session_is_first_message_bot_probe(const session_ctx_t *ctx,
    return false;
 }
 
+/*
+ * Draw the lines this session has not seen yet that were added just ahead
+ * of the sender's own entry (another chatter, the DDial link), before that
+ * entry is echoed. Returns the history count up to and including the own
+ * entry, where the sink cursor may stop without skipping anything; when the
+ * entry is not among the newest lines this is simply the history total.
+ * A stale or reset sink cursor draws nothing, as before.
+ */
+static size_t session_sink_lines_before_own(session_ctx_t *ctx,
+                                            uint64_t own_message_id)
+{
+    enum { SESSION_OWN_ENTRY_SEARCH = 32 };
+
+    const size_t total = host_history_total(ctx->owner);
+    if (own_message_id == 0U || total == 0U) {
+        return total;
+    }
+
+    const size_t start = total > SESSION_OWN_ENTRY_SEARCH
+                             ? total - SESSION_OWN_ENTRY_SEARCH
+                             : 0U;
+    chat_history_entry_t *recent = (chat_history_entry_t *)sshc_gc_malloc(
+        SESSION_OWN_ENTRY_SEARCH * sizeof(*recent));
+    if (recent == nullptr) {
+        return total;
+    }
+    const size_t copied = host_history_copy_range(
+        ctx->owner, start, recent, total - start);
+
+    size_t own_offset = copied;
+    for (size_t idx = copied; idx > 0U; --idx) {
+        if (recent[idx - 1U].message_id == own_message_id) {
+            own_offset = idx - 1U;
+            break;
+        }
+    }
+    if (own_offset == copied) {
+        sshc_gc_free(recent);
+        return total;
+    }
+
+    const size_t own_index = start + own_offset;
+    // Read the cursor under the output lock: a broadcast sink holding it may
+    // be drawing the same lines right now.
+    const bool locked = session_output_lock(ctx);
+    const size_t resume = ctx->last_sink_history_total;
+    const bool can_draw =
+        ctx->history_scroll_position == 0U && !ctx->no_update &&
+        ctx->editor_mode == SESSION_EDITOR_MODE_NONE &&
+        !ctx->bbs_rendering_editor && !session_in_protected_section(ctx) &&
+        (!ctx->display_model_initialized ||
+         display_model_is_following_tail(&ctx->display_model));
+    if (can_draw && resume >= start && resume < own_index) {
+        for (size_t idx = resume; idx < own_index; ++idx) {
+            session_send_history_entry(ctx, &recent[idx - start]);
+        }
+        // Drawn up to our own entry: a broadcast waiting on the output
+        // lock must not draw them again.
+        if (ctx->last_sink_history_total < own_index) {
+            ctx->last_sink_history_total = own_index;
+        }
+    }
+    if (locked) {
+        session_output_unlock(ctx);
+    }
+
+    sshc_gc_free(recent);
+    return own_index + 1U;
+}
+
 static void session_deliver_outgoing_message(session_ctx_t *ctx,
                                              const char *message,
                                              bool clear_prompt_text)
@@ -1265,6 +1335,10 @@ static void session_deliver_outgoing_message(session_ctx_t *ctx,
 
     session_scrollback_reset_position(ctx);
 
+    // Lines that landed just before ours go out first (see below).
+    const size_t own_history_end =
+        session_sink_lines_before_own(ctx, entry.message_id);
+
     // Append the sender's own message immediately so local UX matches how
     // remote messages are shown in real time.
     if (ctx->history_scroll_position == 0U) {
@@ -1301,8 +1375,15 @@ static void session_deliver_outgoing_message(session_ctx_t *ctx,
     chat_room_broadcast_entry(&ctx->owner->room, &entry, ctx);
     session_clear_pending_sink(ctx);
     /* The sender's own line was rendered immediately above; advance the
-     * sink cursor so a later sink does not append it a second time. */
-    ctx->last_sink_history_total = host_history_total(ctx->owner);
+     * sink cursor so a later sink does not append it a second time. Stop
+     * right after our own entry rather than at the history end, so lines
+     * other chatters added meanwhile are not skipped, and sink those. */
+    if (ctx->last_sink_history_total < own_history_end) {
+        ctx->last_sink_history_total = own_history_end;
+    }
+    if (host_history_total(ctx->owner) > ctx->last_sink_history_total) {
+        session_flag_should_sink(ctx);
+    }
 
     (void)host_eliza_intervene(ctx, trimmed, nullptr, false);
     host_ai_route_public(ctx->owner, entry.username, entry.message);
