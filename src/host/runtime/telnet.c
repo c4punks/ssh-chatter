@@ -51,19 +51,6 @@ static int host_telnet_open_socket(host_t *host)
     return fd;
 }
 
-static void session_log_encoding_state(const char *phase,
-                                       const session_ctx_t *ctx)
-{
-    if (phase == nullptr || ctx == nullptr) {
-        return;
-    }
-
-    printf("[encoding-debug] phase=%s transport_kind=%d prefer_utf16_output=%d "
-           "output_kind=%d\n",
-           phase, (int)ctx->transport_kind, (int)ctx->prefer_utf16_output,
-           (int)ctx->output_kind);
-}
-
 uint64_t host_allocate_session_id(host_t *host)
 {
     if (host == nullptr) {
@@ -379,7 +366,6 @@ static void *host_telnet_thread(void *arg)
         snprintf(ctx->client_ip, sizeof(ctx->client_ip), "%.*s",
                  (int)sizeof(ctx->client_ip) - 1, peer_address);
         ctx->input_mode = SESSION_INPUT_MODE_CHAT;
-        session_log_encoding_state("transport_setup", ctx);
 
         bool geo_language_enabled =
             atomic_load(&ctx->owner->geo_language_enabled);

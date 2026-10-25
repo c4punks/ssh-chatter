@@ -123,11 +123,6 @@ static session_ctx_t *session_create(void)
         ctx->lifetime_has_activity = true;
         ctx->lifetime_decay_active = false;
 
-        printf("[encoding-debug] phase=ctx_init transport_kind=%d "
-               "prefer_utf16_output=%d output_kind=%d\n",
-               (int)ctx->transport_kind, (int)ctx->prefer_utf16_output,
-               (int)ctx->output_kind);
-
         if (display_model_init(&ctx->display_model, 256U)) {
             ctx->display_model_initialized = true;
         }

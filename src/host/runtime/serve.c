@@ -533,7 +533,6 @@ int host_serve(host_t *host, const char *bind_addr, const char *port,
             ctx->auth = (auth_profile_t){0};
             snprintf(ctx->client_ip, sizeof(ctx->client_ip), "%.*s",
                      (int)sizeof(ctx->client_ip) - 1, peer_address);
-            session_log_encoding_state("transport_setup", ctx);
             ctx->input_mode = SESSION_INPUT_MODE_CHAT;
 
             bool geo_language_enabled =
