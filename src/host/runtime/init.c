@@ -323,6 +323,8 @@ void host_init(host_t *host, auth_profile_t *auth)
     host_wall_resolve_path(host);
     host->bbs_state_file_path[0] = '\0';
     host_bbs_resolve_path(host);
+    /* After the BBS path: the node directory defaults to its folder. */
+    host_fidonet_init(host);
     host->vote_state_file_path[0] = '\0';
     host_vote_resolve_path(host);
     host->ban_state_file_path[0] = '\0';
@@ -630,6 +632,7 @@ void host_init(host_t *host, auth_profile_t *auth)
     host_runtime_settings_load(host);
     host_ddial_client_start(host);
     host_ddial_hub_start(host);
+    host_fidonet_start(host);
     sshc_memory_context_pop(memory_scope);
 }
 
@@ -1629,6 +1632,7 @@ static void host_shutdown_internal(host_t *host, bool send_sigterm)
     /* Stops the listener and the upstream client; in user mode the client
      * says /Q so the remote logs the account out cleanly. */
     host_ddial_shutdown(host);
+    host_fidonet_shutdown(host);
     host_json_api_listener_stop(host);
 
     if (host->rss_thread_initialized) {

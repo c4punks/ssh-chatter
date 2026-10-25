@@ -2029,6 +2029,37 @@ static const session_help_entry_t kSessionHelpExtended[] = {
     },
     {
         .kind = SESSION_HELP_ENTRY_COMMAND,
+        .label = "fido [list|read|post|reply] <area> ...",
+        .description =
+            {
+                "Read and write FidoNet echomail; mail moves at the zone "
+                "mail hour.",
+                "FidoNet 에코메일을 읽고 씁니다. 메일은 존 메일 아워에 "
+                "오갑니다.",
+                "FidoNet のエコーメールを読み書きします。メールはゾーン"
+                "メールアワーに送受信されます。",
+                "阅读和发表 FidoNet 回声邮件；邮件在区域邮件时段收发。",
+                "Читать и писать эхопочту FidoNet; почта ходит в Zone "
+                "Mail Hour.",
+                "FidoNet-Echomail lesen und schreiben; Post läuft zur Zone "
+                "Mail Hour.",
+                "Lire et écrire l'echomail FidoNet ; le courrier circule à "
+                "l'heure postale de zone.",
+                "Czytaj i pisz echomail FidoNet; poczta krąży w Zone Mail "
+                "Hour.",
+            },
+        .label_translations =
+            {
+                [SESSION_UI_LANGUAGE_KO] = "fido [list|read|post|reply] <에어리어> ...",
+                [SESSION_UI_LANGUAGE_JP] = "fido [list|read|post|reply] <エリア> ...",
+                [SESSION_UI_LANGUAGE_ZH] = "fido [list|read|post|reply] <区域> ...",
+                [SESSION_UI_LANGUAGE_RU] = "fido [list|read|post|reply] <эха> ...",
+            },
+        .label_arg_count = 0U,
+        .label_args = {},
+    },
+    {
+        .kind = SESSION_HELP_ENTRY_COMMAND,
         .label = "iyagi [on|off|status]",
         .description =
             {

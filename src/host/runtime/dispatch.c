@@ -580,6 +580,9 @@ static void session_dispatch_command(session_ctx_t *ctx, const char *line)
     } else if (session_parse_command(effective_line, "/rss", &args)) {
         session_handle_rss(ctx, args);
         return;
+    } else if (session_parse_command(effective_line, "/fido", &args)) {
+        session_handle_fido(ctx, args);
+        return;
     } else if (session_parse_command_any(ctx, "/bbs", effective_line, &args)) {
         session_handle_bbs(ctx, (args != nullptr && args[0] != '\0') ? args
                                                                      : nullptr);

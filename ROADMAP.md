@@ -48,7 +48,10 @@ Goal: lean into the retro-terminal identity; give Syncterm/NetRunner users a nat
 - `@` / sauce-style metadata optional; plain `.ans` upload path for operators
 - Rate-limit exempt for operators; regular users follow the standard post throttle
 
-## v1.4 — FidoNet Connectivity (long-term)
+## v1.4 — FidoNet Connectivity (in review)
+
+Implemented: BinkP originator and answerer with CRAM-MD5, Type 2+ packets, tosser with MSGID dupe cache, charset conversion and ArcMail unpacking, echomail export with MSGID/REPLY/Origin/SEEN-BY/PATH, polling at the zone's Zone Mail Hour, per-area append-only bases in `fidonet/`, `/fido` reader with threads, operator hide and `/fido poll`. Not yet: writing netmail, areafix, bounce handling (Phase 3). See docs/FIDONET.md.
+
 
 Goal: join the surviving store-and-forward network for real retro credibility — but only after the moderation pipeline is proven, because echomail imports external content.
 

@@ -163,7 +163,7 @@ DISPLAY_TEST_OBJ := $(patsubst %.c,$(BUILD_DIR)/%.o,$(DISPLAY_TEST_SRC))
 # UNIT_DEPS_<name>. `make unit-test` builds and runs every one of them.
 UNIT_TEST_NAMES := translation_helpers user_data security_layer chardet \
                    codepage jwt abstract_byte_buffer host_persistence \
-                   ddial_protocol ddial_hub ansi_art
+                   ddial_protocol ddial_hub ansi_art fidonet
 UNIT_TEST_BIN_DIR := $(BUILD_DIR)/unit
 UNIT_TEST_BINS := $(addprefix $(UNIT_TEST_BIN_DIR)/test_,$(UNIT_TEST_NAMES))
 UNIT_TEST_COMMON_SRC := src/memory_manager.c
@@ -183,6 +183,8 @@ UNIT_DEPS_ddial_hub := $(UNIT_DEPS_host_persistence)
 UNIT_DEPS_ddial_protocol :=
 # test_ansi_art.c #includes ansi_art.c (it is part of the aggregate).
 UNIT_DEPS_ansi_art :=
+# test_fidonet.c #includes the pure FidoNet sources (part of the aggregate).
+UNIT_DEPS_fidonet :=
 DEP += $(patsubst %.c,$(BUILD_DIR)/%.d,$(wildcard tests/unit/*.c))
 unit_test_objs = $(patsubst %.c,$(BUILD_DIR)/%.o,$(1))
 
