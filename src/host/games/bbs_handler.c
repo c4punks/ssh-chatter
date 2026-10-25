@@ -75,6 +75,19 @@ static const session_bbs_help_row_t kSessionBbsHelpRows[] = {
         },
     },
     {
+        "post art <title>",
+        {
+            [SESSION_UI_LANGUAGE_EN] = "Paste ANSI art to the art board",
+            [SESSION_UI_LANGUAGE_KO] = "art 게시판에 ANSI 아트 올리기",
+            [SESSION_UI_LANGUAGE_JP] = "art 掲示板に ANSI アートを投稿",
+            [SESSION_UI_LANGUAGE_ZH] = "向 art 版块发布 ANSI 艺术",
+            [SESSION_UI_LANGUAGE_RU] = "Выложить ANSI-арт на доску art",
+            [SESSION_UI_LANGUAGE_DE] = "ANSI-Art im art-Board posten",
+            [SESSION_UI_LANGUAGE_FR] = "Publier de l'ANSI art sur le tableau art",
+            [SESSION_UI_LANGUAGE_PL] = "Wklej ANSI art na tablicę art",
+        },
+    },
+    {
         "edit <id>",
         {
             [SESSION_UI_LANGUAGE_EN] = "Edit a post",

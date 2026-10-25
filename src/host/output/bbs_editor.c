@@ -181,6 +181,8 @@ static void session_bbs_render_post(session_ctx_t *ctx, const bbs_post_t *post,
         ctx->user.is_operator || ctx->user.is_lan_operator;
     bool post_hidden =
         (post->mod_flags & SSH_CHATTER_BBS_MOD_FLAG_HIDDEN) != 0U;
+    const bool ansi_art =
+        (post->mod_flags & SSH_CHATTER_BBS_MOD_FLAG_ANSI_ART) != 0U;
 
     // Start buffering to send entire post in one flush
     session_output_buffer_start(ctx);
@@ -204,10 +206,12 @@ static void session_bbs_render_post(session_ctx_t *ctx, const bbs_post_t *post,
 
     // Translation mode: use the finished translation of this revision, or
     // send title, body and comments off as one batch and repaint on return.
+    // Art is left untranslated: rewording it would only break the picture.
     const translation_bbs_cache_t *translation =
-        session_translation_bbs_ready(ctx, post);
+        ansi_art ? nullptr : session_translation_bbs_ready(ctx, post);
     bool translation_pending = false;
-    if (translation == nullptr && session_translation_output_active(ctx)) {
+    if (!ansi_art && translation == nullptr &&
+        session_translation_output_active(ctx)) {
         (void)session_translation_queue_bbs_post(ctx, post);
         translation_pending = ctx->translation_bbs_cache != nullptr &&
                               ctx->translation_bbs_cache->post_id == post->id &&
@@ -264,8 +268,22 @@ static void session_bbs_render_post(session_ctx_t *ctx, const bbs_post_t *post,
     session_send_plain_line(ctx, bumped_line);
     session_render_separator(ctx, "{Body}");
 
-    // Send body line by line (with BBS color markup expansion)
-    session_send_bbs_body_text(ctx, post->body);
+    if (ansi_art) {
+        if (ctx->terminal_width > 0U &&
+            ctx->terminal_width < SSH_CHATTER_BBS_ART_MIN_WIDTH) {
+            char width_notice[SSH_CHATTER_MESSAGE_LIMIT];
+            snprintf(width_notice, sizeof(width_notice),
+                     "This artwork is drawn for %u columns; your terminal is "
+                     "%zu wide, so lines may wrap.",
+                     (unsigned int)SSH_CHATTER_BBS_ART_MIN_WIDTH,
+                     (size_t)ctx->terminal_width);
+            session_send_system_line(ctx, width_notice);
+        }
+        session_send_ansi_art_body(ctx, post->body);
+    } else {
+        // Send body line by line (with BBS color markup expansion)
+        session_send_bbs_body_text(ctx, post->body);
+    }
 
     if (translation != nullptr && translation->body_chunks > 0U) {
         size_t length = 1U;
@@ -1175,7 +1193,14 @@ static void session_bbs_render_editor(session_ctx_t *ctx, const char *status)
     session_bbs_adjust_editor_scroll(ctx, line_count, window);
 
     // Send title line
-    if (ascii_mode) {
+    if (ascii_mode && ctx->bbs_editor_ansi) {
+        char title_line[SSH_CHATTER_MESSAGE_LIMIT];
+        snprintf(title_line, sizeof(title_line),
+                 "ANSI art post '%s' for the %s board (%zu/%u lines)",
+                 ctx->pending_bbs_title, SSH_CHATTER_BBS_ART_BOARD_NAME,
+                 line_count, (unsigned int)SSH_CHATTER_ASCIIART_MAX_LINES);
+        session_send_plain_line(ctx, title_line);
+    } else if (ascii_mode) {
         char title_line[SSH_CHATTER_MESSAGE_LIMIT];
         snprintf(title_line, sizeof(title_line),
                  "ASCII art draft (%zu/%u lines)", line_count,
@@ -1255,6 +1280,28 @@ static void session_bbs_render_editor(session_ctx_t *ctx, const char *status)
 
         /* BBS_EDITOR_LINE_PREC: reserve 4 bytes for "> " (2), "_" (1), NUL (1) */
         enum { BBS_EDITOR_LINE_PREC = SSH_CHATTER_MESSAGE_LIMIT - 4 };
+        /* ANSI art drafts show their colors; carry those set above the
+         * visible window so the first rows start in the right color. */
+        const bool ansi_preview = ctx->bbs_editor_ansi;
+        const bool previous_dedup = ctx->disable_output_dedup;
+        char ansi_state[256];
+        ansi_state[0] = '\0';
+        if (ansi_preview) {
+            ctx->disable_output_dedup = true;
+            const char *body = ctx->pending_bbs_body;
+            const size_t body_length = ctx->pending_bbs_body_length;
+            size_t offset = 0U;
+            for (size_t idx = 0U; idx < start && offset < body_length; ++idx) {
+                const char *newline =
+                    memchr(body + offset, '\n', body_length - offset);
+                size_t line_length = newline != nullptr
+                                         ? (size_t)(newline - (body + offset))
+                                         : body_length - offset;
+                host_ansi_art_track_sgr(body + offset, line_length,
+                                        ansi_state, sizeof(ansi_state));
+                offset += line_length + 1U;
+            }
+        }
         for (size_t idx = start; idx < end; ++idx) {
             char line_buffer[SSH_CHATTER_MESSAGE_LIMIT];
             session_bbs_copy_line(ctx, idx, line_buffer, sizeof(line_buffer));
@@ -1270,7 +1317,18 @@ static void session_bbs_render_editor(session_ctx_t *ctx, const char *status)
                                   : range_selected ? "* "
                                                    : "  ";
             char display[SSH_CHATTER_MESSAGE_LIMIT];
-            if (cursor_selected) {
+            if (ansi_preview) {
+                const char *shown =
+                    cursor_selected ? ctx->input_buffer : line_buffer;
+                host_ansi_art_compose_line(prefix, ansi_state, shown,
+                                           strlen(shown), display,
+                                           sizeof(display) - 1U);
+                if (cursor_selected) {
+                    strcat(display, "_");
+                }
+                host_ansi_art_track_sgr(line_buffer, strlen(line_buffer),
+                                        ansi_state, sizeof(ansi_state));
+            } else if (cursor_selected) {
                 /* Real-time inline edit: show the live input buffer so the
                  * user sees every keystroke; '_' marks the insertion point. */
                 snprintf(display, sizeof(display), "> %.*s_",
@@ -1283,11 +1341,13 @@ static void session_bbs_render_editor(session_ctx_t *ctx, const char *status)
             }
             session_send_plain_line(ctx, display);
         }
+        ctx->disable_output_dedup = previous_dedup;
         if (insertion_index >= end && insertion_index == line_count) {
             if (ctx->pending_bbs_editing_line) {
                 char display[SSH_CHATTER_MESSAGE_LIMIT];
-                snprintf(display, sizeof(display), "> %.*s_",
-                         BBS_EDITOR_LINE_PREC, ctx->input_buffer);
+                snprintf(display, sizeof(display), "> %.*s%s_",
+                         BBS_EDITOR_LINE_PREC - 4, ctx->input_buffer,
+                         ansi_preview ? "\033[0m" : "");
                 session_send_plain_line(ctx, display);
             } else {
                 session_send_plain_line(ctx, "> ");
@@ -1342,7 +1402,11 @@ static void session_bbs_render_editor(session_ctx_t *ctx, const char *status)
     }
     session_send_plain_line(ctx, publish_hint);
 
-    if (!ascii_mode) {
+    if (ctx->bbs_editor_ansi) {
+        session_send_plain_line(ctx, "Paste ANSI art as-is: SGR colors are "
+                                     "kept, cursor and screen control codes "
+                                     "are removed. BBS markup is not used.");
+    } else if (!ascii_mode) {
         session_send_plain_line(ctx, "Markup: **Bold** / *Italic* / [under]Underline[/under] / [blink]Blink[/blink] / [rev]Reverse[/rev]");
         session_send_plain_line(ctx, "Color: [color_name]text[/color_name] or [fg=color_name]text[/fg] / [bg=color_name]text[/bg]");
         session_send_plain_line(ctx, "Colors: black, red, green, yellow, blue, magenta, cyan, white (or bright_*)");

@@ -770,6 +770,29 @@ static void session_scrollback_navigate_line(session_ctx_t *ctx, int direction)
     session_scrollback_navigate_common(ctx, direction, 0U, true);
 }
 
+/* ANSI art editors keep pasted SGR color sequences in the input line. */
+static bool session_editor_accepts_ansi(const session_ctx_t *ctx)
+{
+    return ctx != nullptr && ctx->bbs_post_pending && ctx->bbs_editor_ansi &&
+           !ctx->bbs_search_active;
+}
+
+/* Append an SGR sequence to the input line without echoing it. A sequence
+ * that does not fit is dropped rather than splitting the line. */
+static void session_input_append_sgr(session_ctx_t *ctx, const char *sequence,
+                                     size_t length)
+{
+    if (ctx == nullptr || sequence == nullptr ||
+        !host_ansi_is_sgr(sequence, length) ||
+        ctx->input_length + length >= sizeof(ctx->input_buffer)) {
+        return;
+    }
+
+    memcpy(&ctx->input_buffer[ctx->input_length], sequence, length);
+    ctx->input_length += length;
+    ctx->input_buffer[ctx->input_length] = '\0';
+}
+
 static bool session_consume_escape_sequence(session_ctx_t *ctx, char ch)
 {
     if (ctx == nullptr) {
@@ -1049,10 +1072,14 @@ static bool session_consume_escape_sequence(session_ctx_t *ctx, char ch)
 
     const bool bracket_sequence = (length >= 2U && sequence[1] == '[');
     if (bracket_sequence) {
-        const char final = sequence[length - 1U];
-        if (final != '~' &&
-            !(length == 3U && isalpha((unsigned char)sequence[2]))) {
+        const unsigned char final = (unsigned char)sequence[length - 1U];
+        const bool overflow = length >= sizeof(ctx->input_escape_buffer);
+        /* Keep collecting until the CSI final byte (0x40-0x7e) arrives. */
+        if (!overflow && (length < 3U || final < 0x40U || final > 0x7eU)) {
             return true;
+        }
+        if (!overflow && final == 'm' && session_editor_accepts_ansi(ctx)) {
+            session_input_append_sgr(ctx, sequence, length);
         }
         if (final == '~') {
             if (length >= 5U && strncmp(&sequence[2], "200", 3) == 0) {

@@ -81,6 +81,11 @@
 #define SSH_CHATTER_BBS_MAX_READMARKS 512
 #define SSH_CHATTER_BBS_MOD_FLAG_HIDDEN 0x01U
 #define SSH_CHATTER_BBS_MOD_FLAG_PINNED 0x02U
+/* The body is ANSI art: shown verbatim (SGR colors only, no BBS markup). */
+#define SSH_CHATTER_BBS_MOD_FLAG_ANSI_ART 0x04U
+#define SSH_CHATTER_BBS_ART_BOARD_NAME "art"
+#define SSH_CHATTER_BBS_ART_BOARD_ID 4U
+#define SSH_CHATTER_BBS_ART_MIN_WIDTH 80U
 #define SSH_CHATTER_BBS_MAX_REPORTS 256
 #define SSH_CHATTER_BBS_MAX_MUTES 256
 #define SSH_CHATTER_BBS_MAX_MODLOG 512
@@ -632,6 +637,7 @@ typedef enum session_input_mode {
 typedef enum session_asciiart_target {
     SESSION_ASCIIART_TARGET_NONE = 0,
     SESSION_ASCIIART_TARGET_CHAT,
+    SESSION_ASCIIART_TARGET_BBS,
 } session_asciiart_target_t;
 
 typedef enum session_editor_mode {
@@ -919,6 +925,8 @@ typedef struct session_ctx {
     char status_message[SSH_CHATTER_STATUS_LEN];
     bool asciiart_pending;
     session_asciiart_target_t asciiart_target;
+    /* The open editor keeps pasted SGR color sequences (ANSI art posts). */
+    bool bbs_editor_ansi;
     char *asciiart_buffer;
     size_t asciiart_length;
     size_t asciiart_line_count;

@@ -527,6 +527,53 @@ static bool host_bbs_file_exists(const char *path)
 
 
 
+static const bbs_board_t *host_bbs_find_board_by_name(const host_t *host,
+                                                      const char *name)
+{
+    if (host == nullptr || host->bbs_boards == nullptr || name == nullptr) {
+        return nullptr;
+    }
+    for (size_t i = 0; i < host->bbs_board_count; ++i) {
+        if (strcasecmp(host->bbs_boards[i].name, name) == 0) {
+            return &host->bbs_boards[i];
+        }
+    }
+    return nullptr;
+}
+
+/* Add the ANSI art gallery board when it is missing. Returns true when the
+ * board list changed and needs saving. */
+static bool host_bbs_boards_ensure_art(host_t *host)
+{
+    if (host == nullptr || host->bbs_boards == nullptr ||
+        host->bbs_board_count >= host->bbs_board_capacity ||
+        host_bbs_find_board_by_name(host, SSH_CHATTER_BBS_ART_BOARD_NAME) !=
+            nullptr) {
+        return false;
+    }
+
+    uint16_t board_id = SSH_CHATTER_BBS_ART_BOARD_ID;
+    uint16_t max_id = 0U;
+    bool id_taken = false;
+    for (size_t i = 0; i < host->bbs_board_count; ++i) {
+        const uint16_t existing = host->bbs_boards[i].board_id;
+        if (existing == board_id) {
+            id_taken = true;
+        }
+        if (existing > max_id) {
+            max_id = existing;
+        }
+    }
+    if (id_taken) {
+        board_id = (uint16_t)(max_id + 1U);
+    }
+
+    host->bbs_boards[host->bbs_board_count++] = (bbs_board_t){
+        board_id, SSH_CHATTER_BBS_ART_BOARD_NAME, "ANSI/ASCII art gallery",
+        false};
+    return true;
+}
+
 static void host_bbs_boards_save_locked(host_t *host)
 {
     if (host == nullptr || host->bbs_state_file_path[0] == '\0') {
@@ -584,6 +631,7 @@ static void host_bbs_boards_load(host_t *host)
             host->bbs_boards[1] = (bbs_board_t){1, "notice", "Notices and announcements", true};
             host->bbs_boards[2] = (bbs_board_t){2, "qna", "Questions and answers", false};
             host->bbs_boards[3] = (bbs_board_t){3, "games", "Game-related posts", false};
+            host_bbs_boards_ensure_art(host);
             host_bbs_boards_save_locked(host);
         }
         return;
@@ -619,6 +667,11 @@ static void host_bbs_boards_load(host_t *host)
         snprintf(b->description, sizeof(b->description), "%s", entry.description);
     }
     fclose(fp);
+
+    /* Boards files written before the art gallery existed gain it here. */
+    if (host_bbs_boards_ensure_art(host)) {
+        host_bbs_boards_save_locked(host);
+    }
 }
 
 static void host_bbs_votes_save_locked(host_t *host)

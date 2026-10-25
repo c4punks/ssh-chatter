@@ -221,10 +221,13 @@ static void session_dispatch_command(session_ctx_t *ctx, const char *line)
 
     else if (session_parse_command_any(ctx, "/asciiart", effective_line,
                                        &args)) {
-        if (*args != '\0') {
-            session_send_system_line(ctx, "Usage: /asciiart");
+        if (*args == '\0') {
+            session_asciiart_begin(ctx, SESSION_ASCIIART_TARGET_CHAT, nullptr);
+        } else if (strncasecmp(args, "bbs", 3U) == 0 &&
+                   (args[3] == '\0' || isspace((unsigned char)args[3]))) {
+            session_bbs_begin_art_post(ctx, args + 3);
         } else {
-            session_asciiart_begin(ctx, SESSION_ASCIIART_TARGET_CHAT);
+            session_send_system_line(ctx, "Usage: /asciiart [bbs <title>]");
         }
         return;
     }

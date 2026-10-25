@@ -113,6 +113,26 @@ static bool session_sequence_resets_theme(const char *sequence_start,
         }
 
         params_start = parse_end;
+        /* Colon sub-parameters belong to this one (38:2::r:g:b). */
+        while (params_start < params_end && *params_start != ';') {
+            ++params_start;
+        }
+        /* 38/48/58;5;n and ;2;r;g;b carry color values, not attributes:
+         * a 0 there is black, not a reset. */
+        if (value == 38L || value == 48L || value == 58L) {
+            size_t skip = 0U;
+            if (params_start + 1 < params_end) {
+                long mode = strtol(params_start + 1, nullptr, 10);
+                skip = mode == 5L ? 2U : (mode == 2L ? 4U : 0U);
+            }
+            while (skip > 0U && params_start < params_end) {
+                ++params_start;
+                while (params_start < params_end && *params_start != ';') {
+                    ++params_start;
+                }
+                --skip;
+            }
+        }
     }
 
     if (reset_all) {

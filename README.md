@@ -19,6 +19,7 @@ SSH-Chatter has started from a C reimplementation of the Go [`ssh-chat`](https:/
   - **Search (Google Search Sense):** Instantly search post titles, bodies, authors, or tags case-insensitively with `search <query>`.
   - **Upvote/Comment Badges (Reddit/Discord Style):** Displays net upvote score and comment counts in colorized status badges (`▲ 12 💬 5`) directly in listings.
   - **Seamless Navigation:** Instantly return to the dashboard list by hitting Enter while reading a post, or refresh the list by hitting Enter from the listing screen. Auto-routes commands without needing a `/bbs` prefix inside BBS mode.
+- ANSI art gallery: `/bbs post art <title>` (or `/asciiart bbs <title>`, or a plain `post` while on the `art` board) opens the art composer for the `art` board. Pasted SGR colors (16/256/truecolor) are kept and replayed line by line with a reset after each row; cursor movement, screen clears, OSC/DCS strings and terminal queries are stripped before storage and again on display.
 - `/asciiart` live composer with a 640-line limit, a ten-minute per-IP cooldown, multi-line output, and keyboard shortcuts for cancelling with Ctrl+A and submitting with Ctrl+S or the locale-aware `>/__ARTWORK_END>` default.
 - `/birthday` to register birthdays, `/grant <ip>` so LAN operators can delegate privileges by address, and `/revoke <ip>` so top LAN admins can reclaim them.
 - Chat UI refresh with a clean divider between history and input, instant input clearing after send, and a friendly "Wait for a moment..." banner
