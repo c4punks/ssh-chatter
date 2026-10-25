@@ -244,7 +244,8 @@ static bool session_asciiart_cooldown_active(session_ctx_t *ctx,
 }
 
 static void session_asciiart_begin(session_ctx_t *ctx,
-                                   session_asciiart_target_t target)
+                                   session_asciiart_target_t target,
+                                   const char *title)
 {
     if (ctx == nullptr || target == SESSION_ASCIIART_TARGET_NONE) {
         return;
@@ -291,11 +292,11 @@ static void session_asciiart_begin(session_ctx_t *ctx,
         }
     }
 
+    session_bbs_reset_pending_post(ctx);
     session_asciiart_reset(ctx);
     ctx->asciiart_pending = true;
     ctx->asciiart_target = target;
 
-    session_bbs_reset_pending_post(ctx);
     if (!session_asciiart_buffer_acquire(ctx) ||
         !session_bbs_workspace_acquire(ctx)) {
         session_send_system_line(
@@ -308,10 +309,24 @@ static void session_asciiart_begin(session_ctx_t *ctx,
 
     size_t ascii_bytes = (size_t)SSH_CHATTER_ASCIIART_BUFFER_LEN;
     char status[SSH_CHATTER_MESSAGE_LIMIT];
-    snprintf(status, sizeof(status),
-             "ASCII art composer ready (max %u lines, up to %zu bytes, "
-             "10-minute cooldown per IP).",
-             SSH_CHATTER_ASCIIART_MAX_LINES, ascii_bytes);
+    if (target == SESSION_ASCIIART_TARGET_BBS) {
+        // Gallery posts keep pasted SGR colors and go to the art board.
+        ctx->bbs_editor_ansi = true;
+        snprintf(ctx->pending_bbs_title, SSH_CHATTER_BBS_TITLE_LEN, "%s",
+                 title != nullptr ? title : "");
+        snprintf(ctx->pending_bbs_tags[0], SSH_CHATTER_BBS_TAG_LEN, "%s",
+                 SSH_CHATTER_BBS_ART_BOARD_NAME);
+        ctx->pending_bbs_tag_count = 1U;
+        snprintf(status, sizeof(status),
+                 "ANSI art composer ready (max %u lines, up to %zu bytes). "
+                 "Paste your artwork; SGR colors are kept.",
+                 SSH_CHATTER_ASCIIART_MAX_LINES, ascii_bytes);
+    } else {
+        snprintf(status, sizeof(status),
+                 "ASCII art composer ready (max %u lines, up to %zu bytes, "
+                 "10-minute cooldown per IP).",
+                 SSH_CHATTER_ASCIIART_MAX_LINES, ascii_bytes);
+    }
 
     session_bbs_render_editor(ctx, status);
 }
@@ -350,6 +365,12 @@ static void session_asciiart_import_from_editor(session_ctx_t *ctx)
 static void session_asciiart_commit(session_ctx_t *ctx)
 {
     if (ctx == nullptr || !ctx->asciiart_pending) {
+        return;
+    }
+
+    // Gallery art is published by session_bbs_commit_pending_post().
+    if (ctx->asciiart_target == SESSION_ASCIIART_TARGET_BBS) {
+        session_asciiart_reset(ctx);
         return;
     }
 

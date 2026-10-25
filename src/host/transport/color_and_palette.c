@@ -1838,6 +1838,7 @@ static void session_bbs_select_board(session_ctx_t *ctx, const char *arguments);
 static void session_bbs_list_topic(session_ctx_t *ctx, const char *topic);
 static void session_bbs_read(session_ctx_t *ctx, uint64_t id);
 static void session_bbs_begin_post(session_ctx_t *ctx, const char *arguments);
+static void session_bbs_begin_art_post(session_ctx_t *ctx, const char *arguments);
 static void session_bbs_begin_edit(session_ctx_t *ctx, uint64_t id);
 static void session_bbs_capture_body_text(session_ctx_t *ctx, const char *text);
 static void session_bbs_capture_body_line(session_ctx_t *ctx, const char *line);
@@ -1897,7 +1898,8 @@ static bool session_asciiart_cooldown_active(session_ctx_t *ctx,
                                              long *remaining_seconds);
 static void session_asciiart_reset(session_ctx_t *ctx);
 static void session_asciiart_begin(session_ctx_t *ctx,
-                                   session_asciiart_target_t target);
+                                   session_asciiart_target_t target,
+                                   const char *title);
 static void session_asciiart_import_from_editor(session_ctx_t *ctx);
 static void session_asciiart_capture_text(session_ctx_t *ctx, const char *text);
 static void session_asciiart_capture_line(session_ctx_t *ctx, const char *line);

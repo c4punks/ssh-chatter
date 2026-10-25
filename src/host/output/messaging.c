@@ -995,6 +995,49 @@ static void session_send_bbs_body_text(session_ctx_t *ctx, const char *text)
     }
 }
 
+/*
+ * Print an ANSI art body verbatim: no BBS markup, only its SGR colors kept.
+ * Each line opens with the colors still active from the line before and
+ * ends with a reset, so nothing bleeds into the prompt or later output.
+ */
+static void session_send_ansi_art_body(session_ctx_t *ctx, const char *text)
+{
+    if (ctx == nullptr || !session_transport_active(ctx) || text == nullptr) {
+        return;
+    }
+
+    char *clean = (char *)malloc(strlen(text) + 1U);
+    if (clean == nullptr) {
+        return;
+    }
+    host_ansi_art_sanitize(text, clean, strlen(text) + 1U);
+
+    // Identical art rows are content, not repeated output to suppress.
+    const bool previous_dedup = ctx->disable_output_dedup;
+    ctx->disable_output_dedup = true;
+
+    char state[256];
+    state[0] = '\0';
+    const char *cursor = clean;
+    while (true) {
+        const char *newline = strchr(cursor, '\n');
+        size_t length = newline != nullptr ? (size_t)(newline - cursor)
+                                           : strlen(cursor);
+        char line[SSH_CHATTER_MESSAGE_LIMIT];
+        host_ansi_art_compose_line(nullptr, state, cursor, length, line,
+                                   sizeof(line));
+        session_send_plain_line(ctx, line);
+        host_ansi_art_track_sgr(cursor, length, state, sizeof(state));
+        if (newline == nullptr) {
+            break;
+        }
+        cursor = newline + 1;
+    }
+
+    ctx->disable_output_dedup = previous_dedup;
+    free(clean);
+}
+
 static void session_format_separator_line(session_ctx_t *ctx, const char *label,
                                           char *out, size_t length)
 {

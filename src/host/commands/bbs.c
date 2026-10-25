@@ -1150,6 +1150,8 @@ static bool session_bbs_load_post_from_state(host_t *host, uint64_t id,
 
         post->in_use = true;
         post->id = serialized.id;
+        post->board_id = serialized.board_id;
+        post->mod_flags = serialized.mod_flags;
         post->tag_count = serialized.tag_count;
         post->comment_count = serialized.comment_count;
         post->created_at = (time_t)serialized.created_at;
@@ -2704,6 +2706,11 @@ static void session_bbs_compact_preview(const char *input, char *output,
     const unsigned char *cursor = (const unsigned char *)input;
 
     while (*cursor != '\0') {
+        size_t escape = host_ansi_escape_length((const char *)cursor);
+        if (escape > 0U) {
+            cursor += escape;
+            continue;
+        }
         unsigned char ch = *cursor++;
         if (ch == '\r' || ch == '\n' || ch == '\t') {
             ch = ' ';
@@ -2756,7 +2763,10 @@ static void session_bbs_announce_post(host_t *host, const bbs_post_t *post)
     trim_whitespace_inplace(title);
 
     char preview[128];
-    session_bbs_compact_preview(post->body, preview, sizeof(preview));
+    preview[0] = '\0';
+    if ((post->mod_flags & SSH_CHATTER_BBS_MOD_FLAG_ANSI_ART) == 0U) {
+        session_bbs_compact_preview(post->body, preview, sizeof(preview));
+    }
 
     char notice[SSH_CHATTER_MESSAGE_LIMIT];
     if (preview[0] != '\0') {
@@ -2815,7 +2825,11 @@ static void session_bbs_reset_pending_post(session_ctx_t *ctx)
         return;
     }
 
+    if (ctx->asciiart_target == SESSION_ASCIIART_TARGET_BBS) {
+        session_asciiart_reset(ctx);
+    }
     ctx->bbs_post_pending = false;
+    ctx->bbs_editor_ansi = false;
     ctx->editor_mode = SESSION_EDITOR_MODE_NONE;
     ctx->pending_bbs_edit_id = 0U;
     ctx->pending_bbs_body_length = 0U;
@@ -2862,7 +2876,8 @@ static void session_bbs_commit_pending_post(session_ctx_t *ctx)
         return;
     }
 
-    if (ctx->editor_mode == SESSION_EDITOR_MODE_ASCIIART) {
+    const bool ansi_art = ctx->bbs_editor_ansi;
+    if (ctx->editor_mode == SESSION_EDITOR_MODE_ASCIIART && !ansi_art) {
         session_asciiart_import_from_editor(ctx);
         if (ctx->asciiart_length == 0U) {
             session_asciiart_cancel(ctx, "ASCII art draft discarded.");
@@ -2873,6 +2888,13 @@ static void session_bbs_commit_pending_post(session_ctx_t *ctx)
         session_asciiart_commit(ctx);
         session_bbs_reset_pending_post(ctx);
         return;
+    }
+
+    if (ansi_art) {
+        // Only SGR colors may reach storage; cursor/screen control is cut.
+        ctx->pending_bbs_body_length = host_ansi_art_sanitize(
+            ctx->pending_bbs_body, ctx->pending_bbs_body,
+            SSH_CHATTER_BBS_BODY_LEN);
     }
 
     if (ctx->pending_bbs_body_length == 0U) {
@@ -2976,6 +2998,14 @@ static void session_bbs_commit_pending_post(session_ctx_t *ctx)
     }
 
     post->board_id = (uint16_t)ctx->bbs_current_board_id;
+    if (ansi_art) {
+        const bbs_board_t *art_board =
+            host_bbs_find_board_by_name(host, SSH_CHATTER_BBS_ART_BOARD_NAME);
+        if (art_board != nullptr) {
+            post->board_id = art_board->board_id;
+        }
+        post->mod_flags = SSH_CHATTER_BBS_MOD_FLAG_ANSI_ART;
+    }
     snprintf(post->author, sizeof(post->author), "%s", ctx->user.name);
     snprintf(post->title, sizeof(post->title), "%s", ctx->pending_bbs_title);
     memcpy(post->body, ctx->pending_bbs_body, ctx->pending_bbs_body_length);
@@ -3001,8 +3031,10 @@ static void session_bbs_commit_pending_post(session_ctx_t *ctx)
     // Mention notifications for the new post (title + body, post level).
     session_bbs_notify_mentions_locked(host, post->title, post->author,
                                        post->id, -1);
-    session_bbs_notify_mentions_locked(host, post->body, post->author,
-                                       post->id, -1);
+    if (!ansi_art) {
+        session_bbs_notify_mentions_locked(host, post->body, post->author,
+                                           post->id, -1);
+    }
 
     snapshot = *post;
     host_bbs_state_save_locked(host);
@@ -3095,9 +3127,81 @@ static void session_bbs_select_avatar_interactive(session_ctx_t *ctx)
     }
 }
 
+/* Whether the session's current board is the ANSI art gallery. */
+static bool session_bbs_current_board_is_art(session_ctx_t *ctx)
+{
+    if (ctx == nullptr || ctx->owner == nullptr) {
+        return false;
+    }
+
+    host_t *host = ctx->owner;
+    ttak_mutex_lock(&host->lock);
+    const bbs_board_t *art =
+        host_bbs_find_board_by_name(host, SSH_CHATTER_BBS_ART_BOARD_NAME);
+    bool is_art = art != nullptr && art->board_id == ctx->bbs_current_board_id;
+    ttak_mutex_unlock(&host->lock);
+    return is_art;
+}
+
+// Open the ANSI art composer for a new post on the art board.
+static void session_bbs_begin_art_post(session_ctx_t *ctx, const char *arguments)
+{
+    if (ctx == nullptr) {
+        return;
+    }
+
+    if (ctx->owner == nullptr || !session_bbs_ensure_live_storage(ctx->owner)) {
+        session_send_system_line(
+            ctx, "The bulletin board is unavailable right now.");
+        return;
+    }
+
+    char title[SSH_CHATTER_BBS_TITLE_LEN];
+    snprintf(title, sizeof(title), "%s", arguments != nullptr ? arguments : "");
+    char *separator = strchr(title, '|');
+    if (separator != nullptr) {
+        *separator = '\0';
+    }
+    trim_whitespace_inplace(title);
+    size_t title_len = strlen(title);
+    if (title_len > 1U && (title[0] == '\"' || title[0] == '\'') &&
+        title[title_len - 1U] == title[0]) {
+        title[title_len - 1U] = '\0';
+        memmove(title, title + 1, title_len - 1U);
+        trim_whitespace_inplace(title);
+    }
+    if (title[0] == '\0') {
+        session_bbs_send_usage(ctx, "post", "art <title>");
+        return;
+    }
+
+    ttak_mutex_lock(&ctx->owner->lock);
+    bool has_board = host_bbs_find_board_by_name(
+                         ctx->owner, SSH_CHATTER_BBS_ART_BOARD_NAME) != nullptr;
+    ttak_mutex_unlock(&ctx->owner->lock);
+    if (!has_board) {
+        session_send_system_line(ctx, "The art board is unavailable.");
+        return;
+    }
+
+    ctx->bbs_view_active = false;
+    ctx->bbs_view_post_id = 0U;
+    session_asciiart_begin(ctx, SESSION_ASCIIART_TARGET_BBS, title);
+}
+
 static void session_bbs_begin_post(session_ctx_t *ctx, const char *arguments)
 {
     if (ctx == nullptr) {
+        return;
+    }
+
+    if (arguments != nullptr && strncasecmp(arguments, "art", 3U) == 0 &&
+        isspace((unsigned char)arguments[3])) {
+        session_bbs_begin_art_post(ctx, arguments + 3);
+        return;
+    }
+    if (!ctx->bbs_post_pending && session_bbs_current_board_is_art(ctx)) {
+        session_bbs_begin_art_post(ctx, arguments);
         return;
     }
 
@@ -3429,6 +3533,8 @@ static void session_bbs_begin_edit(session_ctx_t *ctx, uint64_t id)
     ctx->bbs_post_pending = true;
     ctx->editor_mode = SESSION_EDITOR_MODE_BBS_EDIT;
     ctx->pending_bbs_edit_id = id;
+    ctx->bbs_editor_ansi =
+        (snapshot.mod_flags & SSH_CHATTER_BBS_MOD_FLAG_ANSI_ART) != 0U;
 
     snprintf(ctx->pending_bbs_title, SSH_CHATTER_BBS_TITLE_LEN, "%s",
              snapshot.title);
