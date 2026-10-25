@@ -148,6 +148,15 @@ TEST(split_reply_in_wire_form_and_empty_brackets)
     CHECK_STR_EQ(author, "Ginger Kitty");
     CHECK_STR_EQ(quote, "greets");
 
+    /* Wire form with link slot prefix e.g. "65#5[T1:..." */
+    slot = 0U;
+    CHECK(ddial_split_reply("tritips?^ >>RE:65#5[T1:MerZz) Marc .. proof of burger.",
+                            &text_len, &slot, author, sizeof(author), &quote));
+    CHECK_EQ(text_len, strlen("tritips?"));
+    CHECK_EQ(slot, 5);
+    CHECK_STR_EQ(author, "MerZz");
+    CHECK_STR_EQ(quote, "Marc .. proof of burger.");
+
     slot = 9U;
     CHECK(ddial_split_reply("so?^ >>RE:[] darksix: spoof it", NULL, &slot,
                             author, sizeof(author), &quote));
@@ -180,6 +189,12 @@ TEST(quote_matches_whole_and_clipped_parent)
     CHECK(ddial_reply_quote_matches("nope. here is the article",
                                     "nope. here is..."));
     CHECK(ddial_reply_quote_matches("a  b\tc", "a b c"));
+    CHECK(ddial_reply_quote_matches("*is reading the changelog now to catch up*",
+                                    "is reading the changelog now to catch up"));
+    CHECK(ddial_reply_quote_matches("*is reading the changelog now to catch up*",
+                                    "*is reading the changelog now to catch up*"));
+    CHECK(ddial_reply_quote_matches("plain text message",
+                                    "*plain text message*"));
     CHECK(!ddial_reply_quote_matches("nope. here", "nope. there"));
     CHECK(!ddial_reply_quote_matches("short", "short and longer"));
 }
