@@ -313,7 +313,6 @@ session_ctx_t *host_session_create_for_testing(host_t *host,
     ctx->user.is_authenticated = true;
     ctx->user.is_operator = is_operator;
     ctx->ui_language = SESSION_UI_LANGUAGE_EN;
-    session_log_encoding_state("transport_setup", ctx);
 
     const char *resolved_name =
         (username != nullptr && username[0] != '\0') ? username : "tester";
