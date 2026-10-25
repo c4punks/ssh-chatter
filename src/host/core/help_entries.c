@@ -204,6 +204,20 @@ static const session_bbs_subcommand_alias_t kSessionBbsSubcommands[] = {
             },
     },
     {
+        .canonical = "cmtreply",
+        .localized =
+            {
+                [SESSION_UI_LANGUAGE_EN] = "cmtreply",
+                [SESSION_UI_LANGUAGE_KO] = "답글",
+                [SESSION_UI_LANGUAGE_JP] = "コメント返信",
+                [SESSION_UI_LANGUAGE_ZH] = "回复评论",
+                [SESSION_UI_LANGUAGE_RU] = "ответ-коммент",
+                [SESSION_UI_LANGUAGE_DE] = "kommentarantwort",
+                [SESSION_UI_LANGUAGE_FR] = "repondrecommentaire",
+                [SESSION_UI_LANGUAGE_PL] = "odpowiedzkomentarz",
+            },
+    },
+    {
         .canonical = "cmtedit",
         .localized =
             {
@@ -767,7 +781,8 @@ static const session_help_entry_t kSessionHelpEssential[] = {
     {
         .kind = SESSION_HELP_ENTRY_COMMAND,
         .label = "bbs "
-                 "[list|read|post|comment|cmtedit|cmtdel|regen|delete|search|"
+                 "[list|read|post|comment|cmtreply|cmtedit|cmtdel|regen|delete|"
+                 "search|"
                  "edit|upvote|downvote]",
         .description =
             {

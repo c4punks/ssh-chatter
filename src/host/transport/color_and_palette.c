@@ -1846,6 +1846,7 @@ static bool session_bbs_capture_continue(const session_ctx_t *ctx);
 static void session_bbs_add_comment(session_ctx_t *ctx, const char *arguments);
 static void session_bbs_cmtedit(session_ctx_t *ctx, const char *arguments);
 static void session_bbs_cmtdel(session_ctx_t *ctx, const char *arguments);
+static void session_bbs_cmtreply(session_ctx_t *ctx, const char *arguments);
 static void session_bbs_report(session_ctx_t *ctx, const char *arguments);
 static void session_bbs_reports(session_ctx_t *ctx, const char *arguments);
 static void session_bbs_set_mod_flag(session_ctx_t *ctx, uint64_t post_id,
