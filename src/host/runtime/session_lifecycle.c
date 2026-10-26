@@ -480,6 +480,20 @@ static const login_locale_t kLoginLocales[] = {
     }
 };
 
+static bool session_is_password_command(const char *buf)
+{
+    if (buf == nullptr) {
+        return false;
+    }
+    while (*buf == ' ' || *buf == '\t') {
+        buf++;
+    }
+    return (strncasecmp(buf, "/login ", 7) == 0 ||
+            strncasecmp(buf, "/login\t", 7) == 0 ||
+            strncasecmp(buf, "/signup ", 8) == 0 ||
+            strncasecmp(buf, "/signup\t", 8) == 0);
+}
+
 static bool session_read_line(session_ctx_t *ctx, char *buf, size_t max_len, bool mask_input)
 {
     if (ctx == nullptr || buf == nullptr || max_len == 0) {
@@ -487,6 +501,7 @@ static bool session_read_line(session_ctx_t *ctx, char *buf, size_t max_len, boo
     }
 
     size_t length = 0U;
+    buf[0] = '\0';
     while (length + 1U < max_len) {
         char ch = '\0';
         const int read_result = session_transport_read(ctx, &ch, 1, -1);
@@ -503,6 +518,7 @@ static bool session_read_line(session_ctx_t *ctx, char *buf, size_t max_len, boo
         if (ch == '\b' || (unsigned char)ch == 0x7fU) {
             if (length > 0U) {
                 --length;
+                buf[length] = '\0';
                 session_channel_write(ctx, "\b \b", 3U);
                 session_channel_flush(ctx);
             }
@@ -513,8 +529,10 @@ static bool session_read_line(session_ctx_t *ctx, char *buf, size_t max_len, boo
             continue;
         }
 
+        const bool mask = mask_input || session_is_password_command(buf);
         buf[length++] = ch;
-        if (mask_input) {
+        buf[length] = '\0';
+        if (mask) {
             session_channel_write(ctx, "*", 1U);
         } else {
             session_channel_write(ctx, &ch, 1U);

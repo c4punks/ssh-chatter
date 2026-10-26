@@ -277,6 +277,31 @@ TEST(bbs_threads_follow_shifted_comments)
     free_bbs_host(reader);
 }
 
+/* ---- session_is_password_command ---- */
+
+TEST(login_is_password_command_masking)
+{
+    CHECK(!session_is_password_command(NULL));
+    CHECK(!session_is_password_command(""));
+    CHECK(!session_is_password_command("/login"));
+    CHECK(session_is_password_command("/login "));
+    CHECK(session_is_password_command("/login  "));
+    CHECK(session_is_password_command("/login secret"));
+    CHECK(session_is_password_command("/LOGIN secret"));
+    CHECK(session_is_password_command("  /login secret"));
+    CHECK(session_is_password_command("\t/login secret"));
+    CHECK(session_is_password_command("/login\tsecret"));
+    CHECK(session_is_password_command("/signup secret"));
+    CHECK(session_is_password_command("/SIGNUP 12345"));
+
+    /* Non-password commands should not mask */
+    CHECK(!session_is_password_command("/guest"));
+    CHECK(!session_is_password_command("/guest pass"));
+    CHECK(!session_is_password_command("/exit"));
+    CHECK(!session_is_password_command("/loginsomething"));
+    CHECK(!session_is_password_command("/signupp"));
+}
+
 int main(void)
 {
     snprintf(g_dir, sizeof(g_dir), "/tmp/sshc-persistence-test-%ld",
@@ -289,6 +314,7 @@ int main(void)
     RUN_TEST(state_load_reads_grants_after_surplus_preferences);
     RUN_TEST(bbs_threads_round_trip);
     RUN_TEST(bbs_threads_follow_shifted_comments);
+    RUN_TEST(login_is_password_command_masking);
 
     rmdir(g_dir);
     return TEST_REPORT();
