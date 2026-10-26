@@ -277,6 +277,31 @@ TEST(bbs_threads_follow_shifted_comments)
     free_bbs_host(reader);
 }
 
+/* ---- session_login_line_in_password ---- */
+
+TEST(login_line_in_password_masking)
+{
+    CHECK(!session_login_line_in_password(NULL, 0U));
+    CHECK(!session_login_line_in_password("", 0U));
+    CHECK(!session_login_line_in_password("/login", 6U));
+    CHECK(session_login_line_in_password("/login ", 7U));
+    CHECK(session_login_line_in_password("/login  ", 8U));
+    CHECK(session_login_line_in_password("/login secret", 13U));
+    CHECK(session_login_line_in_password("/LOGIN secret", 13U));
+    CHECK(session_login_line_in_password("  /login secret", 15U));
+    CHECK(session_login_line_in_password("\t/login secret", 14U));
+    CHECK(session_login_line_in_password("/login\tsecret", 13U));
+    CHECK(session_login_line_in_password("/signup secret", 14U));
+    CHECK(session_login_line_in_password("/SIGNUP 12345", 13U));
+
+    /* Non-password commands should not mask */
+    CHECK(!session_login_line_in_password("/guest", 6U));
+    CHECK(!session_login_line_in_password("/guest pass", 11U));
+    CHECK(!session_login_line_in_password("/exit", 5U));
+    CHECK(!session_login_line_in_password("/loginsomething", 15U));
+    CHECK(!session_login_line_in_password("/signupp", 8U));
+}
+
 int main(void)
 {
     snprintf(g_dir, sizeof(g_dir), "/tmp/sshc-persistence-test-%ld",
@@ -289,6 +314,7 @@ int main(void)
     RUN_TEST(state_load_reads_grants_after_surplus_preferences);
     RUN_TEST(bbs_threads_round_trip);
     RUN_TEST(bbs_threads_follow_shifted_comments);
+    RUN_TEST(login_line_in_password_masking);
 
     rmdir(g_dir);
     return TEST_REPORT();

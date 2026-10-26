@@ -480,6 +480,36 @@ static const login_locale_t kLoginLocales[] = {
     }
 };
 
+/* Whether what follows buf[0..length) is a password: the line so far is
+ * "/login " or "/signup " (any case, leading blanks allowed) plus anything
+ * after the blank. */
+static bool session_login_line_in_password(const char *buf, size_t length)
+{
+    if (buf == nullptr || length == 0U) {
+        return false;
+    }
+
+    static const char *const kPasswordCommands[] = {"/login", "/signup"};
+
+    size_t start = 0U;
+    while (start < length && (buf[start] == ' ' || buf[start] == '\t')) {
+        ++start;
+    }
+    for (size_t idx = 0U;
+         idx < sizeof(kPasswordCommands) / sizeof(kPasswordCommands[0]);
+         ++idx) {
+        const size_t command_length = strlen(kPasswordCommands[idx]);
+        if (length > start + command_length &&
+            strncasecmp(&buf[start], kPasswordCommands[idx],
+                        command_length) == 0 &&
+            (buf[start + command_length] == ' ' ||
+             buf[start + command_length] == '\t')) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool session_read_line(session_ctx_t *ctx, char *buf, size_t max_len, bool mask_input)
 {
     if (ctx == nullptr || buf == nullptr || max_len == 0) {
@@ -502,6 +532,22 @@ static bool session_read_line(session_ctx_t *ctx, char *buf, size_t max_len, boo
 
         if (ch == '\b' || (unsigned char)ch == 0x7fU) {
             if (length > 0U) {
+                const bool utf8_input = !ctx->cp437_input_enabled;
+                const bool in_password_tail =
+                    mask_input ||
+                    session_login_line_in_password(buf, length - 1U);
+                if (utf8_input && in_password_tail) {
+                    --length;
+                    while (length > 0U &&
+                           ((unsigned char)buf[length] & 0xC0U) == 0x80U &&
+                           (mask_input ||
+                            session_login_line_in_password(buf, length - 1U))) {
+                        --length;
+                    }
+                    session_channel_write(ctx, "\b \b", 3U);
+                    session_channel_flush(ctx);
+                    continue;
+                }
                 --length;
                 session_channel_write(ctx, "\b \b", 3U);
                 session_channel_flush(ctx);
@@ -513,9 +559,14 @@ static bool session_read_line(session_ctx_t *ctx, char *buf, size_t max_len, boo
             continue;
         }
 
+        const bool utf8_input = !ctx->cp437_input_enabled;
+        const bool password_char =
+            mask_input || session_login_line_in_password(buf, length);
         buf[length++] = ch;
-        if (mask_input) {
-            session_channel_write(ctx, "*", 1U);
+        if (password_char) {
+            if (!utf8_input || ((unsigned char)ch & 0xC0U) != 0x80U) {
+                session_channel_write(ctx, "*", 1U);
+            }
         } else {
             session_channel_write(ctx, &ch, 1U);
         }
