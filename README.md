@@ -15,9 +15,9 @@ SSH-Chatter has started from a C reimplementation of the Go [`ssh-chat`](https:/
 - Terminal-friendly RSS reader accessible with `/rss list`, `/rss read <tag>`, plus `/rss add <url> <tag>` and `/rss del <tag>` (operators only) so the room can browse headlines together.
 - Background BBS watchdog thread that uses the Gemini/Ollama moderation backends to remove posts that advertise crimes or harmful material, plus `/delete-msg` for targeted chat history cleanup.
 - `/bbs` command unlocking an immersive retro bulletin board system with tags, comments, bumping, and a multi-line composer.
-  - **Dynamic Sorting (Reddit/Discord Style):** View posts sorted by `bumped` (recent activity), `hot` (trending by score & comments), `top` (highest net upvotes score), or `new` (creation date) using `list [hot|top|new|bumped|all]`.
-  - **Search (Google Search Sense):** Instantly search post titles, bodies, authors, or tags case-insensitively with `search <query>`.
-  - **Upvote/Comment Badges (Reddit/Discord Style):** Displays net upvote score and comment counts in colorized status badges (`▲ 12 💬 5`) directly in listings.
+  - **Dynamic Sorting:** View posts sorted by `bumped` (recent activity), `hot` (trending by score & comments), `top` (highest net score), or `new` (creation date) using `list [hot|top|new|bumped|all]`.
+  - **Search:** Instantly search post titles, bodies, authors, or tags case-insensitively with `search <query>`.
+  - **Score and Comment Counts:** Displays net score and comment count (`Score: 12 Comments: 5`) directly in listings.
   - **Nested Replies:** `cmtreply <id> <idx> <text>` answers a comment; replies are drawn indented under their parent (depth capped at four), notify the parent's author, and move up a level when the comment they answer is deleted. Reply links live in the `bbs_state_threads.dat` sidecar, so `bbs_state.dat` keeps its v3 layout.
   - **Seamless Navigation:** Instantly return to the dashboard list by hitting Enter while reading a post, or refresh the list by hitting Enter from the listing screen. Auto-routes commands without needing a `/bbs` prefix inside BBS mode.
 - ANSI art gallery: `/bbs post art <title>` (or `/asciiart bbs <title>`, or a plain `post` while on the `art` board) opens the art composer for the `art` board. Pasted SGR colors (16/256/truecolor) are kept and replayed line by line with a reset after each row; cursor movement, screen clears, OSC/DCS strings and terminal queries are stripped before storage and again on display.
