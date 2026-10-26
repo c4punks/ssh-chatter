@@ -30,9 +30,11 @@
 
 ---
 
-## v1.4 — Nested Reply Threading
+## v1.4 — Nested Reply Threading (in review)
 
 Goal: conversations, not flat comment lists.
+
+Implemented with `cmtreply <id> <idx> <text>`; the parent link is a `parent_ref` kept in the `bbs_state_threads.dat` sidecar instead of a new `bbs_state.dat` version, and `cmtdel` re-parents replies instead of blocking.
 
 - `parent_idx` on comments (points at another comment in the same post), set via `comment <id>|<text>` extension (`:reply N` syntax or a `cmtreply` subcommand)
 - Render: indented thread tree under each comment (ANSI-safe, depth-capped)

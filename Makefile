@@ -140,6 +140,22 @@ CFLAGS += -flto=$(LTO_JOBS) -fuse-linker-plugin
 COMMON_LDFLAGS += -flto=$(LTO_JOBS) -fuse-linker-plugin
 endif
 
+# Sanitizer build for tests: `make SANITIZE=address,undefined unit-test`.
+# Uses its own build directory and drops the flags that hide bugs from the
+# sanitizers (aggressive optimisation, omitted frame pointers, LTO).
+SANITIZE ?=
+ifneq ($(SANITIZE),)
+comma := ,
+BUILD_DIR := build/sanitize
+SANITIZE_FLAGS := -fsanitize=$(SANITIZE) -fno-sanitize-recover=all \
+                  -fno-omit-frame-pointer -funwind-tables -O1
+CFLAGS := $(filter-out -Ofast -fomit-frame-pointer -fno-asynchronous-unwind-tables \
+            -D_FORTIFY_SOURCE=3 -flto=% -fuse-linker-plugin,$(CFLAGS)) $(SANITIZE_FLAGS)
+SANITIZE_LD_DROP := -Wl$(comma)-Ofast -flto=% -fuse-linker-plugin
+COMMON_LDFLAGS := $(filter-out $(SANITIZE_LD_DROP),$(COMMON_LDFLAGS)) \
+                  -fsanitize=$(SANITIZE)
+endif
+
 # Define targets and source files
 TARGET := ssh-chatter
 SHARED_TARGET := libssh_chatter_backend.so
@@ -156,6 +172,9 @@ STRESS_SRC := tests/stress_main.c
 STRESS_OBJ := $(patsubst %.c,$(BUILD_DIR)/%.o,$(STRESS_SRC))
 
 DISPLAY_TEST_TARGET := display-model-test
+ifneq ($(SANITIZE),)
+DISPLAY_TEST_TARGET := $(BUILD_DIR)/display-model-test
+endif
 DISPLAY_TEST_SRC := tests/display_model_test.c src/display_model.c
 DISPLAY_TEST_OBJ := $(patsubst %.c,$(BUILD_DIR)/%.o,$(DISPLAY_TEST_SRC))
 
@@ -163,7 +182,7 @@ DISPLAY_TEST_OBJ := $(patsubst %.c,$(BUILD_DIR)/%.o,$(DISPLAY_TEST_SRC))
 # UNIT_DEPS_<name>. `make unit-test` builds and runs every one of them.
 UNIT_TEST_NAMES := translation_helpers user_data security_layer chardet \
                    codepage jwt abstract_byte_buffer host_persistence \
-                   ddial_protocol ddial_hub ansi_art fidonet
+                   ddial_protocol ddial_hub ansi_art bbs_threads fidonet
 UNIT_TEST_BIN_DIR := $(BUILD_DIR)/unit
 UNIT_TEST_BINS := $(addprefix $(UNIT_TEST_BIN_DIR)/test_,$(UNIT_TEST_NAMES))
 UNIT_TEST_COMMON_SRC := src/memory_manager.c
@@ -185,6 +204,8 @@ UNIT_DEPS_ddial_protocol :=
 UNIT_DEPS_ansi_art :=
 # test_fidonet.c #includes the pure FidoNet sources (part of the aggregate).
 UNIT_DEPS_fidonet :=
+# test_bbs_threads.c #includes bbs_threads.c (it is part of the aggregate).
+UNIT_DEPS_bbs_threads :=
 DEP += $(patsubst %.c,$(BUILD_DIR)/%.d,$(wildcard tests/unit/*.c))
 unit_test_objs = $(patsubst %.c,$(BUILD_DIR)/%.o,$(1))
 
@@ -211,14 +232,14 @@ $(SHARED_TARGET): $(SHARED_OBJ) $(TTAK_LIB) $(DOORGAME_DIR)/libdoorgame.a
 $(STRESS_TARGET): $(filter-out $(BUILD_DIR)/src/main.o,$(OBJ)) $(STRESS_OBJ) $(TTAK_LIB)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(DISPLAY_TEST_TARGET): $(DISPLAY_TEST_OBJ) $(TTAK_LIB)
+$(DISPLAY_TEST_TARGET): $(DISPLAY_TEST_OBJ) $(TTAK_LIB) | $(DOORGAME_DIR)/libdoorgame.a
 	$(CC) $(CFLAGS) -o $@ $^ -Wno-error $(LDFLAGS)
 
 .SECONDARY: $(patsubst %.c,$(BUILD_DIR)/%.o,$(wildcard tests/unit/*.c))
 .SECONDEXPANSION:
 $(UNIT_TEST_BIN_DIR)/test_%: $(BUILD_DIR)/tests/unit/test_%.o \
         $$(call unit_test_objs,$$(UNIT_DEPS_$$*) $(UNIT_TEST_COMMON_SRC)) \
-        $(TTAK_LIB)
+        $(TTAK_LIB) | $(DOORGAME_DIR)/libdoorgame.a
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 

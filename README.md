@@ -18,6 +18,7 @@ SSH-Chatter has started from a C reimplementation of the Go [`ssh-chat`](https:/
   - **Dynamic Sorting (Reddit/Discord Style):** View posts sorted by `bumped` (recent activity), `hot` (trending by score & comments), `top` (highest net upvotes score), or `new` (creation date) using `list [hot|top|new|bumped|all]`.
   - **Search (Google Search Sense):** Instantly search post titles, bodies, authors, or tags case-insensitively with `search <query>`.
   - **Upvote/Comment Badges (Reddit/Discord Style):** Displays net upvote score and comment counts in colorized status badges (`▲ 12 💬 5`) directly in listings.
+  - **Nested Replies:** `cmtreply <id> <idx> <text>` answers a comment; replies are drawn indented under their parent (depth capped at four), notify the parent's author, and move up a level when the comment they answer is deleted. Reply links live in the `bbs_state_threads.dat` sidecar, so `bbs_state.dat` keeps its v3 layout.
   - **Seamless Navigation:** Instantly return to the dashboard list by hitting Enter while reading a post, or refresh the list by hitting Enter from the listing screen. Auto-routes commands without needing a `/bbs` prefix inside BBS mode.
 - ANSI art gallery: `/bbs post art <title>` (or `/asciiart bbs <title>`, or a plain `post` while on the `art` board) opens the art composer for the `art` board. Pasted SGR colors (16/256/truecolor) are kept and replayed line by line with a reset after each row; cursor movement, screen clears, OSC/DCS strings and terminal queries are stripped before storage and again on display.
 - `/asciiart` live composer with a 640-line limit, a ten-minute per-IP cooldown, multi-line output, and keyboard shortcuts for cancelling with Ctrl+A and submitting with Ctrl+S or the locale-aware `>/__ARTWORK_END>` default.
@@ -137,6 +138,15 @@ make
 
 This produces an `ssh-chatter` binary in the repository root and a `libssh_chatter_backend.so` shared object that exposes the
 translation helpers for reuse in other applications.  Clean intermediate artifacts with `make clean`.
+
+### Running the tests
+
+```bash
+make unit-test                                  # regular build
+make SANITIZE=address,undefined unit-test       # ASan + UBSan, leaks included
+```
+
+The sanitizer build lives under `build/sanitize/` and does not touch the regular objects. CI runs both on every push and pull request.
 
 ### Using the shared translation backend
 

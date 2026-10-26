@@ -1082,6 +1082,9 @@ typedef struct bbs_comment {
     time_t edited_at; /* 0 = never edited */
     int32_t upvotes;
     int32_t downvotes;
+    /* 0 = top-level comment, otherwise the parent comment's index + 1.
+     * Kept in the bbs_state_threads.dat sidecar, not in bbs_state.dat. */
+    int32_t parent_ref;
 } bbs_comment_t;
 
 typedef struct bbs_post {

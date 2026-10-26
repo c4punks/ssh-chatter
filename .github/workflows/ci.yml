@@ -29,3 +29,27 @@ jobs:
 
       - name: Unit tests
         run: make unit-test
+
+  # Unit tests under AddressSanitizer + UndefinedBehaviorSanitizer (leak
+  # checking included) so use-after-free, overflows and leaks fail the build
+  # instead of turning up later in production core dumps.
+  sanitizers:
+    runs-on: ubuntu-24.04
+    env:
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch submodules
+        run: git submodule update --init --depth 1 lib/inih lib/libttak
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssh-dev libcurl4-openssl-dev \
+            libssl-dev liblz4-dev
+
+      - name: Unit tests (ASan + UBSan)
+        run: make -j"$(nproc)" SANITIZE=address,undefined unit-test

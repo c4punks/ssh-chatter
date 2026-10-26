@@ -109,7 +109,7 @@ static const char *session_bbs_comment_edited_marker(session_ui_language_t lang)
 // malformed tokens are left untouched.
 static void session_bbs_render_comment_text(session_ctx_t *ctx,
                                             const bbs_post_t *post,
-                                            size_t self_idx)
+                                            size_t self_idx, size_t depth)
 {
     if (ctx == nullptr || post == nullptr || post->comments == nullptr ||
         self_idx >= post->comment_count) {
@@ -162,7 +162,43 @@ static void session_bbs_render_comment_text(session_ctx_t *ctx,
     }
     expanded[out] = '\0';
 
-    session_send_bbs_body_text(ctx, expanded);
+    if (depth == 0U) {
+        session_send_bbs_body_text(ctx, expanded);
+        return;
+    }
+
+    // Replies: indent every line by two columns per level.
+    char indent[2U * BBS_THREAD_MAX_DEPTH + 1U];
+    size_t indent_len = 2U * (depth < BBS_THREAD_MAX_DEPTH
+                                  ? depth
+                                  : BBS_THREAD_MAX_DEPTH);
+    memset(indent, ' ', indent_len);
+    indent[indent_len] = '\0';
+
+    size_t lines = 1U;
+    for (size_t idx = 0U; idx < out; ++idx) {
+        if (expanded[idx] == '\n') {
+            ++lines;
+        }
+    }
+    char *indented = (char *)sshc_gc_malloc(out + lines * indent_len + 1U);
+    if (indented == nullptr) {
+        session_send_bbs_body_text(ctx, expanded);
+        return;
+    }
+    size_t pos = 0U;
+    memcpy(indented, indent, indent_len);
+    pos += indent_len;
+    for (size_t idx = 0U; idx < out; ++idx) {
+        indented[pos++] = expanded[idx];
+        if (expanded[idx] == '\n') {
+            memcpy(indented + pos, indent, indent_len);
+            pos += indent_len;
+        }
+    }
+    indented[pos] = '\0';
+    session_send_bbs_body_text(ctx, indented);
+    sshc_gc_free(indented);
 }
 
 static void session_bbs_render_post(session_ctx_t *ctx, const bbs_post_t *post,
@@ -313,8 +349,24 @@ static void session_bbs_render_post(session_ctx_t *ctx, const bbs_post_t *post,
     if (post->comment_count > 0U) {
         session_send_plain_line(ctx, ""); // Empty line for spacing
         session_render_separator(ctx, "Comments");
-        for (size_t idx = 0U; idx < post->comment_count; ++idx) {
+        // Draw replies under the comment they answer.
+        int32_t refs[SSH_CHATTER_BBS_MAX_COMMENTS];
+        size_t order[SSH_CHATTER_BBS_MAX_COMMENTS];
+        size_t depths[SSH_CHATTER_BBS_MAX_COMMENTS];
+        size_t shown = post->comment_count < SSH_CHATTER_BBS_MAX_COMMENTS
+                           ? post->comment_count
+                           : SSH_CHATTER_BBS_MAX_COMMENTS;
+        for (size_t idx = 0U; idx < shown; ++idx) {
+            refs[idx] = post->comments[idx].parent_ref;
+        }
+        shown = bbs_thread_order(refs, shown, order, depths);
+        for (size_t slot = 0U; slot < shown; ++slot) {
+            const size_t idx = order[slot];
+            const size_t depth = depths[slot];
             const bbs_comment_t *comment = &post->comments[idx];
+            char indent[2U * BBS_THREAD_MAX_DEPTH + 1U];
+            memset(indent, ' ', 2U * depth);
+            indent[2U * depth] = '\0';
 
             user_data_record_t commenter_record = {0};
             if (user_data_load(data_root, comment->author, "", &commenter_record) &&
@@ -323,14 +375,26 @@ static void session_bbs_render_post(session_ctx_t *ctx, const bbs_post_t *post,
             }
 
             char comment_author_line[SSH_CHATTER_MESSAGE_LIMIT];
-            snprintf(comment_author_line, sizeof(comment_author_line),
-                     "[%zu] Comment by: %s", idx, comment->author);
+            const int32_t parent = bbs_thread_parent_of(refs, idx);
+            if (parent >= 0) {
+                snprintf(comment_author_line, sizeof(comment_author_line),
+                         "%s\u21b3 [%zu] Reply to [%d] by: %s", indent, idx,
+                         (int)parent, comment->author);
+            } else {
+                snprintf(comment_author_line, sizeof(comment_author_line),
+                         "[%zu] Comment by: %s", idx, comment->author);
+            }
 
             char comment_created_line[SSH_CHATTER_MESSAGE_LIMIT];
             time_t comment_created = (time_t)comment->created_at;
             struct tm comment_created_tm;
             localtime_r(&comment_created, &comment_created_tm);
-            strftime(comment_created_line, sizeof(comment_created_line), "At: %Y-%m-%d %H:%M:%S", &comment_created_tm);
+            size_t at_used = (size_t)snprintf(comment_created_line,
+                                              sizeof(comment_created_line),
+                                              "%s", depth > 0U ? indent : "");
+            strftime(comment_created_line + at_used,
+                     sizeof(comment_created_line) - at_used,
+                     "At: %Y-%m-%d %H:%M:%S", &comment_created_tm);
             if (comment->edited_at != 0) {
                 size_t used = strlen(comment_created_line);
                 snprintf(comment_created_line + used,
@@ -340,7 +404,7 @@ static void session_bbs_render_post(session_ctx_t *ctx, const bbs_post_t *post,
 
             session_send_system_line(ctx, comment_author_line);
             session_send_system_line(ctx, comment_created_line);
-            session_bbs_render_comment_text(ctx, post, idx);
+            session_bbs_render_comment_text(ctx, post, idx, depth);
             if (translation != nullptr) {
                 session_translation_emit_caption(
                     ctx, nullptr,
@@ -358,6 +422,7 @@ static void session_bbs_render_post(session_ctx_t *ctx, const bbs_post_t *post,
     session_send_system_line(ctx, "--------------------------------------------------");
     session_send_system_line(ctx, "[Tip] Reply to this post!");
     session_send_system_line(ctx, " - Add comment:   Type '\033[1;32mcomment <text>\033[0m' (e.g. comment Great post!)");
+    session_send_system_line(ctx, " - Reply:         '\033[1;32mcmtreply <id> <idx> <text>\033[0m' answers comment [idx]");
     session_send_system_line(ctx, " - Vote:          '\033[1;32mupvote <id>\033[0m' / '\033[1;32mdownvote <id>\033[0m', or '\033[1;32mcmtvote <id> <idx> up|down\033[0m' for comments");
     session_send_system_line(ctx, " - Fix comments:  '\033[1;32mcmtedit <id> <idx> <text>\033[0m' / '\033[1;32mcmtdel <id> <idx>\033[0m'");
     session_send_system_line(ctx, " - Back to list:  Type '\033[1;31mlist\033[0m' or press Enter on empty line");
