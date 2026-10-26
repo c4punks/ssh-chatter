@@ -90,6 +90,10 @@ confirm the build still succeeds before pushing the result.
 - `/filestore-upload` accepts an optional destination (for example `/filestore-upload /kitten/meow.png`). SSH-Chatter creates the `/kitten` directory automatically and places the uploaded file there, mirroring how SCP uses paths like `user@host:/kitten/meow.png`.
 - Both transports can mix and match: SSH for unattended scripted transfers, TELNET for nostalgic BBS clients with built-in ZMODEM tooling.
 
+## FidoNet
+
+SSH-Chatter can run as a FidoNet node behind an uplink: `/fido` lists the carried echo areas, shows threads and lets users read, post and reply. Mail is exchanged over BinkP (CRAM-MD5, both calling and answering) once per Zone Mail Hour of the node's zone by default. Inbound packets and ArcMail bundles are tossed with dupe checking and charset conversion to UTF-8. All FidoNet data lives in its own `fidonet/` directory, separate from `bbs_state.dat`. See [docs/FIDONET.md](docs/FIDONET.md).
+
 ## Morse Relay
 SSH-Chatter supports amateur ham radio relay.
 This shows global morse signals.

@@ -13,5 +13,6 @@
 #include "commands/wall.c"
 #include "commands/bbs.c"
 #include "commands/rss.c"
+#include "commands/fidonet.c"
 #include "commands/art.c"
 #include "commands/archive.c"

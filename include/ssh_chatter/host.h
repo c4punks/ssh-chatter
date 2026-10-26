@@ -158,6 +158,7 @@ struct translation_job;
 struct translation_result;
 struct translation_chat_cache;
 struct translation_bbs_cache;
+struct host_fidonet;
 
 struct session_ctx;
 
@@ -1515,6 +1516,8 @@ typedef struct host {
     nickname_claim_t *nickname_claims[SSH_CHATTER_MAX_NICKNAME_CLAIMS];
     size_t nickname_claim_count;
     ddial_relay_t ddial_relay;
+    /* FidoNet node (src/host/fidonet/node.c); nullptr when not configured. */
+    struct host_fidonet *fidonet;
     struct {
         bool enabled;
         int fd;

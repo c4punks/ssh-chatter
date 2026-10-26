@@ -31,6 +31,7 @@ static const char *const kSessionCommandNames[] = {
     "eliza",
     "eliza-chat",
     "exit",
+    "fido",
     "files",
     "filestore",
     "filestore-download",
