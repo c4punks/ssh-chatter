@@ -180,6 +180,103 @@ TEST(state_load_reads_grants_after_surplus_preferences)
     free_host(host);
 }
 
+/* ---- BBS reply threads sidecar ---- */
+
+static host_t *new_bbs_host(void)
+{
+    host_t *host = new_host();
+    if (host == NULL) {
+        return NULL;
+    }
+    host->bbs_post_capacity = 2U;
+    host->bbs_posts = calloc(host->bbs_post_capacity, sizeof(bbs_post_t));
+    for (size_t idx = 0U; idx < host->bbs_post_capacity; ++idx) {
+        host->bbs_posts[idx].comments =
+            calloc(SSH_CHATTER_BBS_MAX_COMMENTS, sizeof(bbs_comment_t));
+    }
+    snprintf(host->bbs_state_file_path, sizeof(host->bbs_state_file_path),
+             "%s/bbs_state.dat", g_dir);
+    return host;
+}
+
+static void free_bbs_host(host_t *host)
+{
+    for (size_t idx = 0U; idx < host->bbs_post_capacity; ++idx) {
+        free(host->bbs_posts[idx].comments);
+    }
+    free(host->bbs_posts);
+    free_host(host);
+}
+
+static void seed_post(host_t *host, size_t count)
+{
+    bbs_post_t *post = &host->bbs_posts[0];
+    post->in_use = true;
+    post->id = 7U;
+    post->comment_count = count;
+    host->bbs_post_count = 1U;
+    for (size_t idx = 0U; idx < count; ++idx) {
+        post->comments[idx].created_at = (time_t)(1000 + idx);
+    }
+}
+
+TEST(bbs_threads_round_trip)
+{
+    host_t *writer = new_bbs_host();
+    CHECK(writer != NULL);
+    seed_post(writer, 4U);
+    writer->bbs_posts[0].comments[1].parent_ref = 1;
+    writer->bbs_posts[0].comments[3].parent_ref = 2;
+    host_bbs_threads_save_locked(writer);
+
+    host_t *reader = new_bbs_host();
+    CHECK(reader != NULL);
+    seed_post(reader, 4U);
+    reader->bbs_posts[0].comments[2].parent_ref = 9; /* stale, must clear */
+    host_bbs_threads_load(reader);
+    CHECK_EQ(reader->bbs_posts[0].comments[0].parent_ref, 0);
+    CHECK_EQ(reader->bbs_posts[0].comments[1].parent_ref, 1);
+    CHECK_EQ(reader->bbs_posts[0].comments[2].parent_ref, 0);
+    CHECK_EQ(reader->bbs_posts[0].comments[3].parent_ref, 2);
+
+    char path[PATH_MAX];
+    host_bbs_v2_path(writer->bbs_state_file_path, "threads.dat", path,
+                     sizeof(path));
+    unlink(path);
+    free_bbs_host(writer);
+    free_bbs_host(reader);
+}
+
+TEST(bbs_threads_follow_shifted_comments)
+{
+    /* Sidecar written with 1 -> 0 and 3 -> 2, then comment 0 vanished from
+     * the main state: 3 -> 2 lands on the shifted slots, 1 -> 0 is dropped. */
+    host_t *writer = new_bbs_host();
+    CHECK(writer != NULL);
+    seed_post(writer, 4U);
+    writer->bbs_posts[0].comments[1].parent_ref = 1;
+    writer->bbs_posts[0].comments[3].parent_ref = 3;
+    host_bbs_threads_save_locked(writer);
+
+    host_t *reader = new_bbs_host();
+    CHECK(reader != NULL);
+    seed_post(reader, 3U);
+    for (size_t idx = 0U; idx < 3U; ++idx) {
+        reader->bbs_posts[0].comments[idx].created_at = (time_t)(1001 + idx);
+    }
+    host_bbs_threads_load(reader);
+    CHECK_EQ(reader->bbs_posts[0].comments[0].parent_ref, 0);
+    CHECK_EQ(reader->bbs_posts[0].comments[1].parent_ref, 0);
+    CHECK_EQ(reader->bbs_posts[0].comments[2].parent_ref, 2);
+
+    char path[PATH_MAX];
+    host_bbs_v2_path(writer->bbs_state_file_path, "threads.dat", path,
+                     sizeof(path));
+    unlink(path);
+    free_bbs_host(writer);
+    free_bbs_host(reader);
+}
+
 int main(void)
 {
     snprintf(g_dir, sizeof(g_dir), "/tmp/sshc-persistence-test-%ld",
@@ -190,6 +287,8 @@ int main(void)
     RUN_TEST(wall_load_sanitizes_untrusted_cells);
     RUN_TEST(wall_load_ignores_mismatched_header);
     RUN_TEST(state_load_reads_grants_after_surplus_preferences);
+    RUN_TEST(bbs_threads_round_trip);
+    RUN_TEST(bbs_threads_follow_shifted_comments);
 
     rmdir(g_dir);
     return TEST_REPORT();

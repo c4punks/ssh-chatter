@@ -120,6 +120,19 @@ static const session_bbs_help_row_t kSessionBbsHelpRows[] = {
         },
     },
     {
+        "cmtreply <id> <idx> <text>",
+        {
+            [SESSION_UI_LANGUAGE_EN] = "Reply to a comment (threaded)",
+            [SESSION_UI_LANGUAGE_KO] = "댓글에 답글 달기 (대댓글)",
+            [SESSION_UI_LANGUAGE_JP] = "コメントに返信（スレッド表示）",
+            [SESSION_UI_LANGUAGE_ZH] = "回复评论（楼中楼）",
+            [SESSION_UI_LANGUAGE_RU] = "Ответить на комментарий (ветка)",
+            [SESSION_UI_LANGUAGE_DE] = "Auf einen Kommentar antworten (Thread)",
+            [SESSION_UI_LANGUAGE_FR] = "Répondre à un commentaire (fil)",
+            [SESSION_UI_LANGUAGE_PL] = "Odpowiedz na komentarz (wątek)",
+        },
+    },
+    {
         "cmtedit <id> <idx> <text>",
         {
             [SESSION_UI_LANGUAGE_EN] = "Edit a comment",
@@ -658,6 +671,8 @@ static void session_handle_bbs(session_ctx_t *ctx, const char *arguments)
         session_bbs_cmtedit(ctx, rest);
     } else if (strcmp(canonical_command, "cmtdel") == 0) {
         session_bbs_cmtdel(ctx, rest);
+    } else if (strcmp(canonical_command, "cmtreply") == 0) {
+        session_bbs_cmtreply(ctx, rest);
     } else if (strcmp(canonical_command, "regen") == 0) {
         if (rest == nullptr || rest[0] == '\0') {
             session_bbs_send_usage(ctx, "regen", "<id>");

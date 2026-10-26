@@ -1173,6 +1173,7 @@ static bool session_bbs_load_post_from_state(host_t *host, uint64_t id,
                      serialized.comments[comment].text);
             post->comments[comment].created_at =
                 (time_t)serialized.comments[comment].created_at;
+            post->comments[comment].parent_ref = 0;
         }
         found = true;
         break;
@@ -1975,7 +1976,7 @@ static void session_bbs_show_dashboard(session_ctx_t *ctx)
         "list [all|hot|top|new] [page], read <id>, topic read <tag>, "
         "post <title> [tags...], edit <id>, "
         "comment <id>|<text> (:N quotes, @nick mentions), "
-        "cmtedit <id> <idx> <text>, cmtdel <id> <idx>, "
+        "cmtreply <id> <idx> <text>, cmtedit <id> <idx> <text>, cmtdel <id> <idx>, "
         "upvote <id>, downvote <id>, cmtvote <id> <idx> up|down, "
         "regen <id>, delete <id>, report <id> [reason], "
         "hide|unhide <id>, pin|unpin <id>, mute <user>[|min], unmute <user>, "
@@ -3562,6 +3563,10 @@ static void session_bbs_begin_edit(session_ctx_t *ctx, uint64_t id)
 }
 
 // Append a comment to a post.
+static void session_bbs_insert_comment(session_ctx_t *ctx, uint64_t id,
+                                       const char *comment_text,
+                                       long parent_idx);
+
 static void session_bbs_add_comment(session_ctx_t *ctx, const char *arguments)
 {
     if (ctx == nullptr || ctx->owner == nullptr || arguments == nullptr) {
@@ -3610,6 +3615,15 @@ static void session_bbs_add_comment(session_ctx_t *ctx, const char *arguments)
         return;
     }
 
+    session_bbs_insert_comment(ctx, id, comment_text, -1L);
+}
+
+/* Add a comment to post id; parent_idx is the comment it replies to, or -1
+ * for a top-level comment. */
+static void session_bbs_insert_comment(session_ctx_t *ctx, uint64_t id,
+                                       const char *comment_text,
+                                       long parent_idx)
+{
     size_t comment_scan_length =
         strnlen(comment_text, SSH_CHATTER_BBS_COMMENT_LEN);
     if (session_security_check_text(ctx, "BBS comment", comment_text,
@@ -3635,6 +3649,11 @@ static void session_bbs_add_comment(session_ctx_t *ctx, const char *arguments)
         ttak_mutex_unlock(&host->lock);
         session_send_system_line(ctx,
                                  "This post has reached the comment limit.");
+        return;
+    }
+    if (parent_idx >= 0 && (size_t)parent_idx >= post->comment_count) {
+        ttak_mutex_unlock(&host->lock);
+        session_send_system_line(ctx, "No comment exists with that index.");
         return;
     }
 
@@ -3670,6 +3689,9 @@ static void session_bbs_add_comment(session_ctx_t *ctx, const char *arguments)
     host_strip_column_reset(comment->text);
     comment->created_at = time(nullptr);
     comment->edited_at = 0;
+    comment->upvotes = 0;
+    comment->downvotes = 0;
+    comment->parent_ref = parent_idx >= 0 ? (int32_t)(parent_idx + 1L) : 0;
     post->bumped_at = comment->created_at;
 
     if (!ctx->user.is_operator && !ctx->user.is_lan_operator) {
@@ -3688,6 +3710,19 @@ static void session_bbs_add_comment(session_ctx_t *ctx, const char *arguments)
                                              comment->author, post->id,
                                              (int32_t)comment_index);
     }
+    // A reply also notifies the author of the comment it answers.
+    if (parent_idx >= 0) {
+        const char *parent_author = post->comments[parent_idx].author;
+        if (parent_author[0] != '\0' &&
+            strncmp(parent_author, comment->author,
+                    SSH_CHATTER_USERNAME_LEN) != 0 &&
+            strncmp(parent_author, post->author, SSH_CHATTER_USERNAME_LEN) !=
+                0) {
+            host_bbs_notification_enqueue_locked(host, 0, parent_author,
+                                                 comment->author, post->id,
+                                                 (int32_t)comment_index);
+        }
+    }
     session_bbs_notify_mentions_locked(host, comment->text, comment->author,
                                        post->id, (int32_t)comment_index);
 
@@ -3699,7 +3734,48 @@ static void session_bbs_add_comment(session_ctx_t *ctx, const char *arguments)
         session_bbs_announce_comment(ctx->owner, &snapshot,
                                      &snapshot.comments[comment_index]);
     }
-    session_bbs_render_post(ctx, &snapshot, "Comment added.", false);
+    session_bbs_render_post(ctx, &snapshot,
+                            parent_idx >= 0 ? "Reply added." : "Comment added.",
+                            false);
+}
+
+// cmtreply <id> <idx> <text>: answer comment idx of post id.
+static void session_bbs_cmtreply(session_ctx_t *ctx, const char *arguments)
+{
+    if (ctx == nullptr || ctx->owner == nullptr || arguments == nullptr ||
+        arguments[0] == '\0') {
+        session_bbs_send_usage(ctx, "cmtreply", "<id> <idx> <text>");
+        return;
+    }
+
+    char *endptr = nullptr;
+    errno = 0;
+    uint64_t post_id = strtoull(arguments, &endptr, 10);
+    if (errno != 0 || endptr == nullptr || endptr == arguments ||
+        *endptr != ' ' || post_id == 0U) {
+        session_bbs_send_usage(ctx, "cmtreply", "<id> <idx> <text>");
+        return;
+    }
+
+    const char *idx_text = endptr;
+    errno = 0;
+    long parent_idx = strtol(idx_text, &endptr, 10);
+    if (errno != 0 || endptr == nullptr || endptr == idx_text ||
+        *endptr != ' ' || parent_idx < 0 ||
+        parent_idx >= (long)SSH_CHATTER_BBS_MAX_COMMENTS) {
+        session_bbs_send_usage(ctx, "cmtreply", "<id> <idx> <text>");
+        return;
+    }
+
+    char text[SSH_CHATTER_MESSAGE_LIMIT];
+    snprintf(text, sizeof(text), "%s", endptr);
+    trim_whitespace_inplace(text);
+    if (text[0] == '\0') {
+        session_bbs_send_usage(ctx, "cmtreply", "<id> <idx> <text>");
+        return;
+    }
+
+    session_bbs_insert_comment(ctx, post_id, text, parent_idx);
 }
 
 static void session_bbs_delete(session_ctx_t *ctx, uint64_t id)
@@ -4156,14 +4232,26 @@ static void session_bbs_cmtdel(session_ctx_t *ctx, const char *arguments)
         return;
     }
 
-    // Shift the dense comment array left over the removed entry.
+    // Replies to the removed comment move up to its parent; references to
+    // later comments shift down with the array.  refs is applied once the
+    // comments themselves have moved.
     size_t removed_idx = (size_t)comment_idx;
+    int32_t refs[SSH_CHATTER_BBS_MAX_COMMENTS];
+    for (size_t idx = 0U; idx < post->comment_count; ++idx) {
+        refs[idx] = post->comments[idx].parent_ref;
+    }
+    bbs_thread_remove(refs, post->comment_count, removed_idx);
+
+    // Shift the dense comment array left over the removed entry.
     if (removed_idx + 1U < post->comment_count) {
         memmove(&post->comments[removed_idx], &post->comments[removed_idx + 1U],
                 (post->comment_count - removed_idx - 1U) *
                     sizeof(*post->comments));
     }
     post->comment_count--;
+    for (size_t idx = 0U; idx < post->comment_count; ++idx) {
+        post->comments[idx].parent_ref = refs[idx];
+    }
 
     // Fix up comment votes: drop votes on the removed comment and shift
     // indexes of later comments on the same post down by one.

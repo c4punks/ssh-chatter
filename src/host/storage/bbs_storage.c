@@ -160,6 +160,7 @@ static void host_bbs_boards_save_locked(host_t *host);
 static void host_bbs_votes_save_locked(host_t *host);
 static void host_bbs_drafts_save_locked(host_t *host);
 static void host_bbs_notifications_save_locked(host_t *host);
+static void host_bbs_threads_save_locked(host_t *host);
 static void host_bbs_readmarks_save_locked(host_t *host);
 static void host_bbs_reports_save_locked(host_t *host);
 static void host_bbs_mutes_save_locked(host_t *host);
@@ -170,6 +171,7 @@ static void host_bbs_boards_load(host_t *host);
 static void host_bbs_votes_load(host_t *host);
 static void host_bbs_drafts_load(host_t *host);
 static void host_bbs_notifications_load(host_t *host);
+static void host_bbs_threads_load(host_t *host);
 static void host_bbs_readmarks_load(host_t *host);
 static void host_bbs_reports_load(host_t *host);
 static void host_bbs_mutes_load(host_t *host);
@@ -189,6 +191,7 @@ static void host_bbs_aux_loads(host_t *host)
     host_bbs_votes_load(host);
     host_bbs_drafts_load(host);
     host_bbs_notifications_load(host);
+    host_bbs_threads_load(host);
     host_bbs_readmarks_load(host);
     host_bbs_reports_load(host);
     host_bbs_mutes_load(host);
@@ -489,6 +492,7 @@ static void host_bbs_state_save_locked(host_t *host)
     host_bbs_votes_save_locked(host);
     host_bbs_drafts_save_locked(host);
     host_bbs_notifications_save_locked(host);
+    host_bbs_threads_save_locked(host);
     host_bbs_readmarks_save_locked(host);
     host_bbs_reports_save_locked(host);
     host_bbs_mutes_save_locked(host);
@@ -979,6 +983,142 @@ static void host_bbs_notifications_load(host_t *host)
     for (size_t i = 0U; i < incoming_count; ++i) {
         host->bbs_notifications[host->bbs_notification_count++] = incoming[i];
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reply threads (text sidecar, one reply per line)                   */
+/* ------------------------------------------------------------------ */
+
+/* Each line is "post_id|child_idx|child_created|parent_idx|parent_created".
+ * The indexes are hints: on load a comment whose stamp no longer matches is
+ * looked up by its stamp, so a sidecar written before a later main-state
+ * save still lands on the right comments or is dropped. */
+static void host_bbs_threads_save_locked(host_t *host)
+{
+    if (host == nullptr || host->bbs_state_file_path[0] == '\0' ||
+        host->bbs_posts == nullptr) {
+        return;
+    }
+    char path[PATH_MAX];
+    host_bbs_v2_path(host->bbs_state_file_path, "threads.dat", path,
+                     sizeof(path));
+    char temp_path[PATH_MAX + 16];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+
+    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        return;
+    }
+    FILE *fp = fdopen(fd, "wb");
+    if (fp == nullptr) {
+        close(fd);
+        return;
+    }
+
+    size_t capacity = host_bbs_loop_limit(host);
+    for (size_t idx = 0U; idx < capacity; ++idx) {
+        const bbs_post_t *post = &host->bbs_posts[idx];
+        if (!post->in_use || post->comments == nullptr) {
+            continue;
+        }
+        for (size_t child = 0U; child < post->comment_count; ++child) {
+            int32_t ref = post->comments[child].parent_ref;
+            if (ref <= 0 || (size_t)(ref - 1) >= child) {
+                continue;
+            }
+            size_t parent = (size_t)(ref - 1);
+            fprintf(fp, "%" PRIu64 "|%zu|%lld|%zu|%lld\n", post->id, child,
+                    (long long)post->comments[child].created_at, parent,
+                    (long long)post->comments[parent].created_at);
+        }
+    }
+
+    fflush(fp);
+    fsync(fd);
+    fclose(fp);
+    chmod(temp_path, S_IRUSR | S_IWUSR);
+    rename(temp_path, path);
+    chmod(path, S_IRUSR | S_IWUSR);
+}
+
+/* Index of the comment created at stamp, trying hint first; -1 if none. */
+static long host_bbs_threads_find_comment(const bbs_post_t *post, size_t hint,
+                                          time_t stamp)
+{
+    if (hint < post->comment_count &&
+        post->comments[hint].created_at == stamp) {
+        return (long)hint;
+    }
+    for (size_t idx = 0U; idx < post->comment_count; ++idx) {
+        if (post->comments[idx].created_at == stamp) {
+            return (long)idx;
+        }
+    }
+    return -1;
+}
+
+static void host_bbs_threads_load(host_t *host)
+{
+    if (host == nullptr || host->bbs_state_file_path[0] == '\0' ||
+        host->bbs_posts == nullptr) {
+        return;
+    }
+
+    size_t capacity = host_bbs_loop_limit(host);
+    for (size_t idx = 0U; idx < capacity; ++idx) {
+        bbs_post_t *post = &host->bbs_posts[idx];
+        if (post->comments == nullptr) {
+            continue;
+        }
+        for (size_t comment = 0U; comment < SSH_CHATTER_BBS_MAX_COMMENTS;
+             ++comment) {
+            post->comments[comment].parent_ref = 0;
+        }
+    }
+
+    char path[PATH_MAX];
+    host_bbs_v2_path(host->bbs_state_file_path, "threads.dat", path,
+                     sizeof(path));
+    if (!host_bbs_file_exists(path)) {
+        return;
+    }
+    FILE *fp = fopen(path, "rb");
+    if (fp == nullptr) {
+        return;
+    }
+
+    char line[160];
+    while (fgets(line, sizeof(line), fp) != nullptr) {
+        unsigned long long post_id = 0ULL;
+        size_t child_hint = 0U;
+        size_t parent_hint = 0U;
+        long long child_stamp = 0LL;
+        long long parent_stamp = 0LL;
+        if (sscanf(line, "%llu|%zu|%lld|%zu|%lld", &post_id, &child_hint,
+                   &child_stamp, &parent_hint, &parent_stamp) != 5) {
+            continue;
+        }
+        bbs_post_t *post = nullptr;
+        for (size_t idx = 0U; idx < capacity; ++idx) {
+            if (host->bbs_posts[idx].in_use &&
+                host->bbs_posts[idx].id == (uint64_t)post_id) {
+                post = &host->bbs_posts[idx];
+                break;
+            }
+        }
+        if (post == nullptr || post->comments == nullptr) {
+            continue;
+        }
+        long child = host_bbs_threads_find_comment(post, child_hint,
+                                                   (time_t)child_stamp);
+        long parent = host_bbs_threads_find_comment(post, parent_hint,
+                                                    (time_t)parent_stamp);
+        if (child < 0 || parent < 0 || parent >= child) {
+            continue;
+        }
+        post->comments[child].parent_ref = (int32_t)(parent + 1);
+    }
+    fclose(fp);
 }
 
 /* ------------------------------------------------------------------ */
