@@ -134,6 +134,15 @@ make
 This produces an `ssh-chatter` binary in the repository root and a `libssh_chatter_backend.so` shared object that exposes the
 translation helpers for reuse in other applications.  Clean intermediate artifacts with `make clean`.
 
+### Running the tests
+
+```bash
+make unit-test                                  # regular build
+make SANITIZE=address,undefined unit-test       # ASan + UBSan, leaks included
+```
+
+The sanitizer build lives under `build/sanitize/` and does not touch the regular objects. CI runs both on every push and pull request.
+
 ### Using the shared translation backend
 
 The shared object reuses the server's C translation pipeline (including ANSI placeholder preservation) so other processes can
