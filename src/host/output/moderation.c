@@ -1333,3 +1333,97 @@ static void session_handle_chat_lookup(session_ctx_t *ctx,
     session_send_history_entry(ctx, &entry);
     session_send_reply_tree(ctx, entry.message_id, 0U, 1U);
 }
+
+static void session_handle_thread(session_ctx_t *ctx, const char *arguments)
+{
+    if (ctx == nullptr || ctx->owner == nullptr) {
+        return;
+    }
+
+    static const char *kUsage = "Usage: /thread <message-id|r#reply-id>";
+    char usage[SSH_CHATTER_MESSAGE_LIMIT];
+    session_command_format_usage(ctx, "/thread",
+                                 session_command_localize(ctx, kUsage), usage,
+                                 sizeof(usage));
+
+    if (arguments == nullptr) {
+        session_send_system_line(ctx, usage);
+        return;
+    }
+
+    char working[64];
+    snprintf(working, sizeof(working), "%s", arguments);
+    trim_whitespace_inplace(working);
+    if (working[0] == '\0') {
+        session_send_system_line(ctx, usage);
+        return;
+    }
+
+    char *saveptr = nullptr;
+    char *target = strtok_r(working, " \t", &saveptr);
+    if (target == nullptr || strtok_r(nullptr, " \t", &saveptr) != nullptr) {
+        session_send_system_line(ctx, usage);
+        return;
+    }
+
+    bool targeting_reply = false;
+    if (*target == 'r' || *target == 'R') {
+        targeting_reply = true;
+        ++target;
+    }
+    if (*target == '#') {
+        ++target;
+    }
+    if (*target == '\0') {
+        session_send_system_line(ctx, usage);
+        return;
+    }
+
+    uint64_t identifier = 0U;
+    if (!host_compact_id_decode(target, &identifier) || identifier == 0U) {
+        session_send_system_line(ctx, usage);
+        return;
+    }
+
+    uint64_t message_id = identifier;
+    if (targeting_reply) {
+        chat_reply_entry_t reply = {0};
+        if (!host_replies_find_entry_by_id(ctx->owner, identifier, &reply)) {
+            char message[SSH_CHATTER_MESSAGE_LIMIT];
+            char label[32];
+            if (!host_compact_id_encode(identifier, label, sizeof(label))) {
+                snprintf(label, sizeof(label), "%" PRIu64, identifier);
+            }
+            session_command_snprintf(ctx, message, sizeof(message),
+                                     "Reply r#%s was not found.", label);
+            session_send_system_line(ctx, message);
+            return;
+        }
+        message_id = reply.parent_message_id;
+    }
+
+    chat_history_entry_t entry = {0};
+    if (message_id == 0U ||
+        !host_history_find_entry_by_id(ctx->owner, message_id, &entry)) {
+        char message[SSH_CHATTER_MESSAGE_LIMIT];
+        char label[32];
+        if (!host_compact_id_encode(message_id, label, sizeof(label))) {
+            snprintf(label, sizeof(label), "%" PRIu64, message_id);
+        }
+        session_command_snprintf(ctx, message, sizeof(message),
+                                 "Message #%s was not found.", label);
+        session_send_system_line(ctx, message);
+        return;
+    }
+
+    char header[SSH_CHATTER_MESSAGE_LIMIT];
+    char label[32];
+    if (!host_compact_id_encode(message_id, label, sizeof(label))) {
+        snprintf(label, sizeof(label), "%" PRIu64, message_id);
+    }
+    session_command_snprintf(ctx, header, sizeof(header), "Thread for #%s:",
+                             label);
+    session_send_system_line(ctx, header);
+    session_send_history_entry(ctx, &entry);
+    session_send_reply_tree(ctx, entry.message_id, 0U, 1U);
+}

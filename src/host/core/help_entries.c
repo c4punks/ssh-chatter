@@ -617,6 +617,29 @@ static const session_help_entry_t kSessionHelpEssential[] = {
     },
     {
         .kind = SESSION_HELP_ENTRY_COMMAND,
+        .label = "thread <message-id|r#reply-id>",
+        .description =
+            {
+                "Show a message and its complete reply thread.",
+                "메시지와 전체 답장 스레드를 보여줍니다.",
+                "メッセージと返信スレッド全体を表示します。",
+                "显示消息及其完整回复线程。",
+                "Показать сообщение и всю цепочку ответов.",
+                "Eine Nachricht und ihren vollständigen Antwort-Thread anzeigen.",
+                "Afficher un message et tout son fil de réponses.",
+                "Pokaż wiadomość i cały wątek odpowiedzi.",
+            },
+        .label_translations =
+            {
+                [SESSION_UI_LANGUAGE_KO] = "스레드 <메시지ID|r#답장ID>",
+                [SESSION_UI_LANGUAGE_JP] = "スレッド <メッセージID|r#返信ID>",
+                [SESSION_UI_LANGUAGE_ZH] = "线程 <消息ID|r#回复ID>",
+                [SESSION_UI_LANGUAGE_RU] =
+                    "тред <id сообщения|r#id ответа>",
+            },
+    },
+    {
+        .kind = SESSION_HELP_ENTRY_COMMAND,
         .label = "pm <username>|<message>",
         .description =
             {

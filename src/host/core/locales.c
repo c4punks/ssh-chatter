@@ -654,6 +654,16 @@ static const session_command_alias_t kSessionCommandAliases[] = {
             },
     },
     {
+        .canonical = "/thread",
+        .localized =
+            {
+                [SESSION_UI_LANGUAGE_KO] = "/스레드",
+                [SESSION_UI_LANGUAGE_JP] = "/スレッド",
+                [SESSION_UI_LANGUAGE_ZH] = "/线程",
+                [SESSION_UI_LANGUAGE_RU] = "/тред",
+            },
+    },
+    {
         .canonical = "/nick",
         .localized =
             {

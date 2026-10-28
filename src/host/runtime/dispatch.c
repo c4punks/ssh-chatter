@@ -281,6 +281,11 @@ static void session_dispatch_command(session_ctx_t *ctx, const char *line)
         return;
     }
 
+    else if (session_parse_command_any(ctx, "/thread", effective_line, &args)) {
+        session_handle_thread(ctx, args);
+        return;
+    }
+
     else if (session_parse_command_any(ctx, "/image", effective_line, &args)) {
         session_handle_image(ctx, args);
         return;
