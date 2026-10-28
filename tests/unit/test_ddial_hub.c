@@ -278,6 +278,172 @@ TEST(rebuild_is_idempotent)
     CHECK_EQ(reply_count_for(parent.message_id), 1);
 }
 
+static bool command_output(const char *command, char *output, size_t output_cap)
+{
+    if (command == NULL || output == NULL || output_cap == 0U) {
+        return false;
+    }
+    output[0] = '\0';
+
+    int pipefd[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, pipefd) != 0) {
+        return false;
+    }
+
+    session_ctx_t ctx = {0};
+    ctx.transport_kind = SESSION_TRANSPORT_TELNET;
+    ctx.telnet_fd = pipefd[1];
+    ctx.owner = g_host;
+    ctx.terminal_width = 80;
+    ctx.terminal_height = 24;
+    session_dispatch_command(&ctx, command);
+    close(pipefd[1]);
+
+    size_t used = 0U;
+    while (used + 1U < output_cap) {
+        ssize_t n = read(pipefd[0], output + used, output_cap - used - 1U);
+        if (n > 0) {
+            used += (size_t)n;
+            continue;
+        }
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+    close(pipefd[0]);
+    output[used] = '\0';
+    return true;
+}
+
+TEST(thread_command_shows_mixed_nested_tree_from_message_or_reply)
+{
+    chat_history_entry_t root =
+        commit_user("ThreadRoot", "thread root marker");
+    chat_history_entry_t ddial = commit_system(
+        "71#8[T1:Dialer) ddial child marker^ >>RE:ThreadRoot: thread root "
+        "marker");
+    uint64_t ddial_reply_id = 0U;
+    CHECK(host_ddial_reply_link_get(ddial.message_id, &ddial_reply_id, NULL,
+                                    0U));
+
+    chat_reply_entry_t nested = {0};
+    nested.parent_message_id = root.message_id;
+    nested.parent_reply_id = ddial_reply_id;
+    snprintf(nested.username, sizeof(nested.username), "%s", "NestedUser");
+    snprintf(nested.message, sizeof(nested.message), "%s",
+             "nested child marker");
+    chat_reply_entry_t nested_stored = {0};
+    CHECK(host_replies_commit_entry(g_host, &nested, &nested_stored));
+
+    chat_reply_entry_t direct = {0};
+    direct.parent_message_id = root.message_id;
+    snprintf(direct.username, sizeof(direct.username), "%s", "DirectUser");
+    snprintf(direct.message, sizeof(direct.message), "%s",
+             "direct child marker");
+    chat_reply_entry_t direct_stored = {0};
+    CHECK(host_replies_commit_entry(g_host, &direct, &direct_stored));
+
+    char root_label[32];
+    char ddial_label[32];
+    char nested_label[32];
+    char direct_label[32];
+    CHECK(host_compact_id_encode(root.message_id, root_label,
+                                 sizeof(root_label)));
+    CHECK(host_compact_id_encode(ddial_reply_id, ddial_label,
+                                 sizeof(ddial_label)));
+    CHECK(host_compact_id_encode(nested_stored.reply_id, nested_label,
+                                 sizeof(nested_label)));
+    CHECK(host_compact_id_encode(direct_stored.reply_id, direct_label,
+                                 sizeof(direct_label)));
+
+    char command[128];
+    snprintf(command, sizeof(command), "/thread %s", root_label);
+    char output[32768];
+    CHECK(command_output(command, output, sizeof(output)));
+
+    char expected[256];
+    snprintf(expected, sizeof(expected), "Thread for #%s:", root_label);
+    CHECK(strstr(output, expected) != NULL);
+    CHECK(strstr(output, "thread root marker") != NULL);
+    snprintf(expected, sizeof(expected), "    (r#%s) ddial child marker",
+             ddial_label);
+    char *ddial_pos = strstr(output, expected);
+    CHECK(ddial_pos != NULL);
+    snprintf(expected, sizeof(expected), "        (r#%s) nested child marker",
+             nested_label);
+    char *nested_pos = strstr(output, expected);
+    CHECK(nested_pos != NULL);
+    snprintf(expected, sizeof(expected), "    (r#%s) direct child marker",
+             direct_label);
+    char *direct_pos = strstr(output, expected);
+    CHECK(direct_pos != NULL);
+    CHECK(ddial_pos < nested_pos && nested_pos < direct_pos);
+
+    snprintf(command, sizeof(command), "/thread r#%s", nested_label);
+    CHECK(command_output(command, output, sizeof(output)));
+    snprintf(expected, sizeof(expected), "Thread for #%s:", root_label);
+    CHECK(strstr(output, expected) != NULL);
+    CHECK(strstr(output, "thread root marker") != NULL);
+    CHECK(strstr(output, "ddial child marker") != NULL);
+    CHECK(strstr(output, "nested child marker") != NULL);
+    CHECK(strstr(output, "direct child marker") != NULL);
+}
+
+TEST(thread_command_accepts_ddial_root_id)
+{
+    chat_history_entry_t root =
+        commit_system("71#9[T1:DialRoot) ddial root marker");
+    chat_history_entry_t reply = commit_system(
+        "71#8[T1:Dialer) ddial root reply marker^ >>RE:[9] DialRoot: ddial "
+        "root marker");
+    uint64_t reply_id = 0U;
+    CHECK(host_ddial_reply_link_get(reply.message_id, &reply_id, NULL, 0U));
+
+    char root_label[32];
+    char reply_label[32];
+    CHECK(host_compact_id_encode(root.message_id, root_label,
+                                 sizeof(root_label)));
+    CHECK(host_compact_id_encode(reply_id, reply_label, sizeof(reply_label)));
+    char command[128];
+    snprintf(command, sizeof(command), "/thread d%s", root_label);
+    char output[16384];
+    CHECK(command_output(command, output, sizeof(output)));
+    CHECK(strstr(output, "ddial root marker") != NULL);
+    char expected[256];
+    snprintf(expected, sizeof(expected), "    (r#%s) ddial root reply marker",
+             reply_label);
+    CHECK(strstr(output, expected) != NULL);
+}
+
+TEST(thread_command_rejects_bad_targets_without_mutation)
+{
+    size_t history_before = host_history_total(g_host);
+    ttak_mutex_lock(&g_host->lock);
+    size_t replies_before = g_host->reply_count;
+    ttak_mutex_unlock(&g_host->lock);
+
+    const char *usage_commands[] = {
+        "/thread", "/thread nonsense", "/thread 1 extra", "/thread r#",
+    };
+    char output[16384];
+    for (size_t idx = 0U;
+         idx < sizeof(usage_commands) / sizeof(usage_commands[0]); ++idx) {
+        CHECK(command_output(usage_commands[idx], output, sizeof(output)));
+        CHECK(strstr(output, "Usage: /thread <message-id|r#reply-id>") != NULL);
+    }
+
+    CHECK(command_output("/thread 9999", output, sizeof(output)));
+    CHECK(strstr(output, "Message #9999 was not found.") != NULL);
+    CHECK(command_output("/thread r#9999", output, sizeof(output)));
+    CHECK(strstr(output, "Reply r#9999 was not found.") != NULL);
+    CHECK_EQ(host_history_total(g_host), history_before);
+    ttak_mutex_lock(&g_host->lock);
+    size_t replies_after = g_host->reply_count;
+    ttak_mutex_unlock(&g_host->lock);
+    CHECK_EQ(replies_after, replies_before);
+}
+
 TEST(full_reply_table_drops_the_oldest)
 {
     ttak_mutex_lock(&g_host->lock);
@@ -698,6 +864,9 @@ int main(void)
     RUN_TEST(ddial_reply_to_chatter_message_and_chatter_reply);
     RUN_TEST(unmatched_ddial_reply_stays_a_plain_line);
     RUN_TEST(rebuild_is_idempotent);
+    RUN_TEST(thread_command_shows_mixed_nested_tree_from_message_or_reply);
+    RUN_TEST(thread_command_accepts_ddial_root_id);
+    RUN_TEST(thread_command_rejects_bad_targets_without_mutation);
     RUN_TEST(full_reply_table_drops_the_oldest);
     RUN_TEST(station_key_create_match_revoke);
     RUN_TEST(failed_logins_block_an_address);

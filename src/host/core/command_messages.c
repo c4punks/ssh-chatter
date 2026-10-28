@@ -1575,6 +1575,54 @@ static const session_command_message_t kSessionCommandMessages[] = {
             [SESSION_UI_LANGUAGE_PL] = "%s jest teraz zajęty; spróbuj za chwilę.",
         },
     },
+    {
+        "Usage: /thread <message-id|r#reply-id>",
+        {
+            [SESSION_UI_LANGUAGE_KO] = "사용법: /thread <메시지ID|r#답장ID>",
+            [SESSION_UI_LANGUAGE_JP] = "使い方: /thread <メッセージID|r#返信ID>",
+            [SESSION_UI_LANGUAGE_ZH] = "用法：/thread <消息ID|r#回复ID>",
+            [SESSION_UI_LANGUAGE_RU] = "Использование: /thread <id сообщения|r#id ответа>",
+            [SESSION_UI_LANGUAGE_DE] = "Verwendung: /thread <Nachrichten-ID|r#Antwort-ID>",
+            [SESSION_UI_LANGUAGE_FR] = "Utilisation : /thread <id-message|r#id-réponse>",
+            [SESSION_UI_LANGUAGE_PL] = "Użycie: /thread <id-wiadomości|r#id-odpowiedzi>",
+        },
+    },
+    {
+        "Reply r#%s was not found.",
+        {
+            [SESSION_UI_LANGUAGE_KO] = "답장 r#%s을(를) 찾을 수 없습니다.",
+            [SESSION_UI_LANGUAGE_JP] = "返信 r#%s が見つかりません。",
+            [SESSION_UI_LANGUAGE_ZH] = "未找到回复 r#%s。",
+            [SESSION_UI_LANGUAGE_RU] = "Ответ r#%s не найден.",
+            [SESSION_UI_LANGUAGE_DE] = "Antwort r#%s wurde nicht gefunden.",
+            [SESSION_UI_LANGUAGE_FR] = "Réponse r#%s introuvable.",
+            [SESSION_UI_LANGUAGE_PL] = "Nie znaleziono odpowiedzi r#%s.",
+        },
+    },
+    {
+        "Message #%s was not found.",
+        {
+            [SESSION_UI_LANGUAGE_KO] = "메시지 #%s을(를) 찾을 수 없습니다.",
+            [SESSION_UI_LANGUAGE_JP] = "メッセージ #%s が見つかりません。",
+            [SESSION_UI_LANGUAGE_ZH] = "未找到消息 #%s。",
+            [SESSION_UI_LANGUAGE_RU] = "Сообщение #%s не найдено.",
+            [SESSION_UI_LANGUAGE_DE] = "Nachricht #%s wurde nicht gefunden.",
+            [SESSION_UI_LANGUAGE_FR] = "Message #%s introuvable.",
+            [SESSION_UI_LANGUAGE_PL] = "Nie znaleziono wiadomości #%s.",
+        },
+    },
+    {
+        "Thread for #%s:",
+        {
+            [SESSION_UI_LANGUAGE_KO] = "메시지 #%s의 스레드:",
+            [SESSION_UI_LANGUAGE_JP] = "メッセージ #%s のスレッド:",
+            [SESSION_UI_LANGUAGE_ZH] = "消息 #%s 的线程：",
+            [SESSION_UI_LANGUAGE_RU] = "Тред сообщения #%s:",
+            [SESSION_UI_LANGUAGE_DE] = "Thread zu Nachricht #%s:",
+            [SESSION_UI_LANGUAGE_FR] = "Fil du message #%s :",
+            [SESSION_UI_LANGUAGE_PL] = "Wątek wiadomości #%s:",
+        },
+    },
 };
 
 // Returns the message in the session's UI language, or the English text when
