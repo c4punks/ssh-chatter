@@ -823,6 +823,9 @@ static void chat_room_broadcast_entry(chat_room_t *room,
                 if (from != nullptr && member == from) {
                     continue;
                 }
+                if (atomic_load(&member->current_room) != entry->room_id) {
+                    continue;
+                }
                 // Skip users who are scrolled back in history, in an editor,
                 // or browsing a protected section (archive/bbs/rss/game).
                 if (member->no_update || member->history_scroll_position > 0U ||
@@ -891,8 +894,9 @@ static void chat_room_broadcast_entry(chat_room_t *room,
 
         bool locked = session_output_lock(member);
 
-        // Language/encoding filtering based on sender's ui_language
-        if (entry->is_user_message && !member->unicode_all_mode) {
+        // Encoding rooms use room membership instead of the main-room UI filter.
+        if (entry->room_id == CHAT_ROOM_MAIN && entry->is_user_message &&
+            !member->unicode_all_mode) {
             if ((int)entry->sender_ui_language != (int)member->ui_language) {
                 if (locked) {
                     session_output_unlock(member);
@@ -994,8 +998,8 @@ static void chat_room_broadcast_entry(chat_room_t *room,
     }
 
     if (room->owner != nullptr) {
-        if (entry->is_user_message && entry->username[0] != '\0' &&
-            entry->message[0] != '\0') {
+        if (entry->room_id == CHAT_ROOM_MAIN && entry->is_user_message &&
+            entry->username[0] != '\0' && entry->message[0] != '\0') {
             /* Write the already-stored chatter text directly to the upstream
              * DDial server as raw normalized telnet data. */
             host_ddial_client_send(room->owner, entry->username,
@@ -1218,6 +1222,10 @@ static bool host_state_read_history_entry(FILE *fp, uint32_t version,
     }
     entry->created_at = (time_t)serialized.created_at;
     entry->preserve_whitespace = serialized.reserved[0] != 0U;
+    entry->room_id = serialized.reserved[1];
+    if (entry->room_id > CHAT_ROOM_MAX_ID || entry->room_id == CHAT_ROOM_CP437) {
+        entry->room_id = CHAT_ROOM_MAIN;
+    }
     snprintf(entry->attachment_target, sizeof(entry->attachment_target), "%s",
              serialized.attachment_target);
     snprintf(entry->attachment_caption, sizeof(entry->attachment_caption), "%s",
@@ -1270,6 +1278,7 @@ static bool host_state_write_history_entry(FILE *fp,
            sizeof(serialized.reaction_counts));
     memset(serialized.reserved, 0, sizeof(serialized.reserved));
     serialized.reserved[0] = entry->preserve_whitespace ? 1U : 0U;
+    serialized.reserved[1] = entry->room_id;
 
     return fwrite(&serialized, sizeof(serialized), 1U, fp) == 1U;
 }
@@ -2170,6 +2179,103 @@ static bool host_replies_commit_entry(host_t *host, chat_reply_entry_t *entry,
     return committed;
 }
 
+static bool session_chat_room_is_valid(uint8_t room_id)
+{
+    return room_id == CHAT_ROOM_MAIN || room_id == CHAT_ROOM_UTF8 ||
+           (room_id > CHAT_ROOM_CP437 && room_id <= CHAT_ROOM_MAX_ID);
+}
+
+static const char *session_chat_room_name(uint8_t room_id)
+{
+    if (room_id == CHAT_ROOM_MAIN) {
+        return "main";
+    }
+    if (!session_chat_room_is_valid(room_id)) {
+        return nullptr;
+    }
+    return session_codepage_name((session_codepage_t)(room_id - 1U));
+}
+
+static uint8_t session_chat_room_from_name(const char *name)
+{
+    if (name == nullptr) {
+        return UINT8_MAX;
+    }
+    for (uint8_t room_id = 0U; room_id <= CHAT_ROOM_MAX_ID; ++room_id) {
+        const char *candidate = session_chat_room_name(room_id);
+        if (candidate != nullptr && strcasecmp(candidate, name) == 0) {
+            return room_id;
+        }
+    }
+    return UINT8_MAX;
+}
+
+static bool session_chat_room_exists(host_t *host, uint8_t room_id)
+{
+    if (host == nullptr || !session_chat_room_is_valid(room_id)) {
+        return false;
+    }
+    if (room_id == CHAT_ROOM_MAIN) {
+        return true;
+    }
+    bool found = false;
+    ttak_mutex_lock(&host->lock);
+    host_history_restore_cache_locked(host);
+    for (size_t idx = 0U; idx < host->history_count; ++idx) {
+        if (host->history[idx].room_id == room_id) {
+            found = true;
+            break;
+        }
+    }
+    ttak_mutex_unlock(&host->lock);
+    return found;
+}
+
+static uint8_t session_multilingual_route_room(const session_ctx_t *ctx,
+                                               const char *message)
+{
+    if (ctx == nullptr || message == nullptr) {
+        return CHAT_ROOM_MAIN;
+    }
+    if (ctx->multilingual_route_override_active) {
+        return ctx->multilingual_route_override;
+    }
+    uint8_t current = atomic_load(&ctx->current_room);
+    if (!ctx->multilingual_route_enabled) {
+        return current;
+    }
+    for (const unsigned char *p = (const unsigned char *)message; *p != '\0';
+         ++p) {
+        if (*p >= 0x80U) {
+            if (!ctx->cp437_input_enabled) {
+                return CHAT_ROOM_UTF8;
+            }
+            if (ctx->active_codepage > SESSION_CODEPAGE_CP437 &&
+                ctx->active_codepage < SESSION_CODEPAGE_AUTO) {
+                return (uint8_t)ctx->active_codepage + 1U;
+            }
+            return current;
+        }
+    }
+    return current;
+}
+
+static void host_store_multilingual_route(host_t *host,
+                                          const session_ctx_t *ctx)
+{
+    if (host == nullptr || ctx == nullptr) {
+        return;
+    }
+    ttak_mutex_lock(&host->lock);
+    user_preference_t *pref =
+        host_ensure_preference_locked(host, ctx->user.name, "");
+    if (pref != nullptr) {
+        pref->multilingual_route_enabled = ctx->multilingual_route_enabled;
+    }
+    host_state_save_locked(host);
+    ttak_mutex_unlock(&host->lock);
+}
+
 static bool host_history_record_user(host_t *host, const session_ctx_t *from,
                                      const char *message,
                                      bool preserve_whitespace,
@@ -2182,6 +2288,7 @@ static bool host_history_record_user(host_t *host, const session_ctx_t *from,
 
     chat_history_entry_t entry;
     chat_history_entry_prepare_user(&entry, from, message, preserve_whitespace);
+    entry.room_id = session_multilingual_route_room(from, message);
     return host_history_commit_entry(host, &entry, stored_entry);
 }
 

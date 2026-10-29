@@ -108,6 +108,7 @@ typedef struct translation_job {
     char target_language[SSH_CHATTER_LANG_NAME_LEN];
     size_t placeholder_lines;
     uint64_t generation;
+    uint8_t input_room_id;
     struct translation_job *next;
     union {
         struct {
@@ -154,6 +155,7 @@ typedef struct translation_result {
     char pm_to_target_label[SSH_CHATTER_MESSAGE_LIMIT];
     char pm_to_sender_label[SSH_CHATTER_MESSAGE_LIMIT];
     uint64_t generation;
+    uint8_t input_room_id;
     uint64_t message_id;
     bool backfill;
     char chat_id_label[32];
@@ -632,6 +634,7 @@ static bool session_translation_queue_input(session_ctx_t *ctx,
 
     job->type = TRANSLATION_JOB_INPUT;
     job->placeholder_lines = 0U;
+    job->input_room_id = session_multilingual_route_room(ctx, text);
     snprintf(job->target_language, sizeof(job->target_language), "%s",
              ctx->input_translation_language);
     snprintf(job->data.input.original, sizeof(job->data.input.original), "%s",
@@ -1526,6 +1529,8 @@ static void session_translation_flush_ready(session_ctx_t *ctx)
     while (ready != nullptr) {
         translation_result_t *next = ready->next;
         if (ready->type == TRANSLATION_JOB_INPUT) {
+            ctx->multilingual_route_override = ready->input_room_id;
+            ctx->multilingual_route_override_active = true;
             if (ready->success) {
                 if (ready->detected_language[0] != '\0') {
                     snprintf(ctx->last_detected_input_language,
@@ -1541,6 +1546,7 @@ static void session_translation_flush_ready(session_ctx_t *ctx)
                 session_send_system_line(ctx, error_message);
                 session_deliver_outgoing_message(ctx, ready->original, false);
             }
+            ctx->multilingual_route_override_active = false;
             refreshed = true;
             sshc_gc_free(ready);
             ready = next;
@@ -1777,6 +1783,7 @@ static void session_translation_publish_result(
     result->type = job->type;
     result->success = success;
     result->placeholder_lines = job->placeholder_lines;
+    result->input_room_id = job->input_room_id;
 
     if (job->type == TRANSLATION_JOB_INPUT) {
         snprintf(result->original, sizeof(result->original), "%s",

@@ -1400,6 +1400,7 @@ static void host_state_save_force_locked(host_t *host)
         serialized.breaking_alerts_enabled =
             pref->breaking_alerts_enabled ? 1U : 0U;
         memset(serialized.reserved2, 0, sizeof(serialized.reserved2));
+        serialized.reserved2[0] = pref->multilingual_route_enabled ? 1U : 0U;
         snprintf(serialized.birthday, sizeof(serialized.birthday), "%s",
                  pref->birthday);
         snprintf(serialized.output_translation_language,
@@ -2128,6 +2129,11 @@ host_state_read_history_entry_from_stream(FILE *fp, uint32_t version,
     }
     entry_value->created_at = (time_t)serialized.created_at;
     entry_value->preserve_whitespace = serialized.reserved[0] != 0U;
+    entry_value->room_id = serialized.reserved[1];
+    if (entry_value->room_id > CHAT_ROOM_MAX_ID ||
+        entry_value->room_id == CHAT_ROOM_CP437) {
+        entry_value->room_id = CHAT_ROOM_MAIN;
+    }
     snprintf(entry_value->attachment_target,
              sizeof(entry_value->attachment_target), "%s",
              serialized.attachment_target);

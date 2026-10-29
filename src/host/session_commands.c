@@ -10,6 +10,7 @@
 #include "commands/social.c"
 #include "commands/poll.c"
 #include "commands/settings.c"
+#include "commands/rooms.c"
 #include "commands/wall.c"
 #include "commands/bbs.c"
 #include "commands/rss.c"
