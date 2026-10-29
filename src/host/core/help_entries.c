@@ -2275,6 +2275,38 @@ static const session_help_entry_t kSessionHelpOperator[] = {
     },
     {
         .kind = SESSION_HELP_ENTRY_COMMAND,
+        .label = "ddial <requests|approve <request-id>|deny <request-id>>",
+        .description =
+            {
+                "Review inbound station requests. approve issues a key shown "
+                "once and removes the request; deny removes it without "
+                "issuing a key (operator only).",
+                "들어온 스테이션 요청을 검토합니다. approve는 한 번만 표시되는 "
+                "키를 발급하고 요청을 삭제하며, deny는 키 없이 요청을 삭제합니다 "
+                "(운영자 전용).",
+                "受信したステーション要求を確認します。approve は一度だけ表示"
+                "されるキーを発行して要求を削除し、deny はキーを発行せず要求を"
+                "削除します（オペレーター専用）。",
+                "查看收到的站点请求。approve 签发仅显示一次的密钥并删除请求；"
+                "deny 不签发密钥，直接删除请求（仅限管理员）。",
+                "Просмотр входящих запросов станций. approve выдаёт ключ, "
+                "показываемый один раз, и удаляет запрос; deny удаляет запрос "
+                "без выдачи ключа (только оператор).",
+                "Eingehende Stationsanfragen prüfen. approve erstellt einen nur "
+                "einmal angezeigten Schlüssel und löscht die Anfrage; deny "
+                "löscht sie ohne Schlüssel (nur Operatoren).",
+                "Examiner les demandes de stations entrantes. approve génère "
+                "une clé affichée une seule fois et supprime la demande ; deny "
+                "la supprime sans clé (opérateur uniquement).",
+                "Przeglądaj przychodzące zgłoszenia stacji. approve wydaje klucz "
+                "widoczny tylko raz i usuwa zgłoszenie; deny usuwa je bez "
+                "wydawania klucza (tylko operator).",
+            },
+        .label_arg_count = 0U,
+        .label_args = {},
+    },
+    {
+        .kind = SESSION_HELP_ENTRY_COMMAND,
         .label = "resetpw <nickname>",
         .description =
             {

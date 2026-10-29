@@ -1070,7 +1070,7 @@ static void session_handle_ddial(session_ctx_t *ctx, const char *arguments)
                  relay->port);
         session_send_system_line(ctx, status);
         session_send_system_line(
-            ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status|key|hub>");
+            ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status|key|hub|requests|approve <request-id>|deny <request-id>>");
         return;
     }
 
@@ -1088,11 +1088,15 @@ static void session_handle_ddial(session_ctx_t *ctx, const char *arguments)
         return;
     }
 
-    /* Station hub: keys that let other stations link to this one. */
-    if (strcasecmp(action, "key") == 0 || strcasecmp(action, "hub") == 0) {
+    /* Station hub: requests and keys for inbound station links. */
+    if (strcasecmp(action, "key") == 0 || strcasecmp(action, "hub") == 0 ||
+        strcasecmp(action, "requests") == 0 ||
+        strcasecmp(action, "approve") == 0 ||
+        strcasecmp(action, "deny") == 0) {
         if (!ctx->user.is_operator) {
-            session_send_system_line(ctx, "Only operators can manage DDial "
-                                          "station links.");
+            session_send_system_line(
+                ctx, session_command_localize(
+                         ctx, "Only operators can manage DDial station links."));
             return;
         }
         if (strcasecmp(action, "hub") == 0) {
@@ -1110,6 +1114,89 @@ static void session_handle_ddial(session_ctx_t *ctx, const char *arguments)
             session_send_system_line(ctx, header);
             if (count > 0U) {
                 session_send_system_line(ctx, listing);
+            }
+            return;
+        }
+        if (strcasecmp(action, "requests") == 0) {
+            char listing[SSH_CHATTER_MESSAGE_LIMIT * 2U];
+            size_t count = host_ddial_hub_request_list(ctx->owner, listing,
+                                                       sizeof(listing));
+            if (count == 0U) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "No pending station requests."));
+            } else {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "Pending station requests:"));
+                session_send_system_line(ctx, listing);
+            }
+            return;
+        }
+        if (strcasecmp(action, "approve") == 0 ||
+            strcasecmp(action, "deny") == 0) {
+            const bool approving = strcasecmp(action, "approve") == 0;
+            char id_text[16];
+            (void)session_consume_token(rest, id_text, sizeof(id_text));
+            const char *digits = id_text[0] == '#' ? id_text + 1 : id_text;
+            char *end = nullptr;
+            unsigned long id = strtoul(digits, &end, 10);
+            if (digits[0] == '\0' || end == nullptr || *end != '\0' ||
+                id == 0UL || id > UINT_MAX) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, approving
+                                      ? "Usage: /ddial approve <request-id>"
+                                      : "Usage: /ddial deny <request-id>"));
+                return;
+            }
+
+            if (approving) {
+                char name[DDIAL_MAX_HANDLE_LEN];
+                char key[DDIAL_STATION_KEY_LEN + 1U];
+                unsigned key_id = 0U;
+                ddial_hub_request_result_t result =
+                    host_ddial_hub_request_approve(ctx->owner, (unsigned)id,
+                                                   name, key, &key_id);
+                if (result == DDIAL_HUB_REQUEST_NOT_FOUND) {
+                    session_send_system_line(
+                        ctx, session_command_localize(
+                                 ctx, "No station request with that id."));
+                    return;
+                }
+                if (result != DDIAL_HUB_REQUEST_OK) {
+                    session_send_system_line(
+                        ctx, session_command_localize(
+                                 ctx, "Could not approve station request."));
+                    return;
+                }
+                char line[SSH_CHATTER_MESSAGE_LIMIT];
+                session_command_snprintf(
+                    ctx, line, sizeof(line),
+                    "Station request #%u approved. Station key #%u for '%s': "
+                    "%s (shown once; give it to that station's operator)",
+                    (unsigned)id, key_id, name, key);
+                session_send_system_line(ctx, line);
+                memset(key, 0, sizeof(key));
+                return;
+            }
+
+            ddial_hub_request_result_t result =
+                host_ddial_hub_request_deny(ctx->owner, (unsigned)id);
+            if (result == DDIAL_HUB_REQUEST_NOT_FOUND) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "No station request with that id."));
+            } else if (result != DDIAL_HUB_REQUEST_OK) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "Could not deny station request."));
+            } else {
+                char line[SSH_CHATTER_MESSAGE_LIMIT];
+                session_command_snprintf(ctx, line, sizeof(line),
+                                         "Station request #%u denied.",
+                                         (unsigned)id);
+                session_send_system_line(ctx, line);
             }
             return;
         }
@@ -1313,7 +1400,7 @@ static void session_handle_ddial(session_ctx_t *ctx, const char *arguments)
 
     session_send_system_line(ctx, "Unknown /ddial subcommand.");
     session_send_system_line(
-        ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status>");
+        ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status|key|hub|requests|approve <request-id>|deny <request-id>>");
 }
 
 void session_handle_ddial_slash(session_ctx_t *ctx, const char *line)

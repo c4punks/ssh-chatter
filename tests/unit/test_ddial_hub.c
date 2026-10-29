@@ -278,7 +278,8 @@ TEST(rebuild_is_idempotent)
     CHECK_EQ(reply_count_for(parent.message_id), 1);
 }
 
-static bool command_output(const char *command, char *output, size_t output_cap)
+static bool command_output_as(const char *command, bool is_operator,
+                              char *output, size_t output_cap)
 {
     if (command == NULL || output == NULL || output_cap == 0U) {
         return false;
@@ -294,6 +295,7 @@ static bool command_output(const char *command, char *output, size_t output_cap)
     ctx.transport_kind = SESSION_TRANSPORT_TELNET;
     ctx.telnet_fd = pipefd[1];
     ctx.owner = g_host;
+    ctx.user.is_operator = is_operator;
     ctx.terminal_width = 80;
     ctx.terminal_height = 24;
     session_dispatch_command(&ctx, command);
@@ -314,6 +316,11 @@ static bool command_output(const char *command, char *output, size_t output_cap)
     close(pipefd[0]);
     output[used] = '\0';
     return true;
+}
+
+static bool command_output(const char *command, char *output, size_t output_cap)
+{
+    return command_output_as(command, false, output, output_cap);
 }
 
 TEST(thread_command_shows_mixed_nested_tree_from_message_or_reply)
@@ -519,6 +526,105 @@ TEST(station_key_create_match_revoke)
     CHECK(host_ddial_hub_key_revoke(g_host, next_id));
 }
 
+TEST(station_request_workflow_persists_and_manages_requests)
+{
+    char output[16384];
+    CHECK(command_output("/ddial requests", output, sizeof(output)));
+    CHECK(strstr(output, "Only operators can manage DDial station links.") !=
+          NULL);
+
+    unsigned approve_id = 0U;
+    unsigned duplicate_id = 0U;
+    unsigned deny_id = 0U;
+    CHECK(host_ddial_hub_request_register(g_host, "ApprovalTarget",
+                                          "192.0.2.101", &approve_id));
+    CHECK(host_ddial_hub_request_register(g_host, "approvaltarget",
+                                          "192.0.2.101", &duplicate_id));
+    CHECK_EQ(duplicate_id, approve_id);
+    CHECK(host_ddial_hub_request_register(g_host, "DenyTarget", "192.0.2.102",
+                                          &deny_id));
+    CHECK(deny_id != approve_id);
+
+    CHECK(command_output_as("/ddial requests", true, output, sizeof(output)));
+    CHECK(strstr(output, "Pending station requests:") != NULL);
+    CHECK(strstr(output, "ApprovalTarget [192.0.2.101]") != NULL);
+    CHECK(strstr(output, "DenyTarget [192.0.2.102]") != NULL);
+
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/ddial_station_requests.dat", g_dir);
+    struct stat st;
+    CHECK_EQ(stat(path, &st), 0);
+    CHECK_EQ(st.st_mode & 0777, 0600);
+    FILE *fp = fopen(path, "r");
+    CHECK(fp != NULL);
+    char contents[4096] = {0};
+    size_t n = fread(contents, 1U, sizeof(contents) - 1U, fp);
+    fclose(fp);
+    contents[n] = '\0';
+    CHECK(strstr(contents, "ApprovalTarget") != NULL);
+    CHECK(strstr(contents, "DenyTarget") != NULL);
+
+    pthread_mutex_lock(&g_ddial_hub_key_lock);
+    memset(g_ddial_hub_requests, 0, sizeof(g_ddial_hub_requests));
+    g_ddial_hub_request_count = 0U;
+    g_ddial_hub_next_request_id = 1U;
+    g_ddial_hub_requests_loaded = false;
+    g_ddial_hub_request_path[0] = '\0';
+    pthread_mutex_unlock(&g_ddial_hub_key_lock);
+
+    char listing[4096];
+    CHECK_EQ(host_ddial_hub_request_list(g_host, listing, sizeof(listing)), 2U);
+    CHECK(strstr(listing, "ApprovalTarget") != NULL);
+    CHECK(strstr(listing, "DenyTarget") != NULL);
+
+    char command[64];
+    snprintf(command, sizeof(command), "/ddial approve %u", approve_id);
+    CHECK(command_output_as(command, true, output, sizeof(output)));
+    char *approved = strstr(output, "Station request #");
+    CHECK(approved != NULL);
+    unsigned parsed_request_id = 0U;
+    unsigned key_id = 0U;
+    char name[DDIAL_MAX_HANDLE_LEN] = {0};
+    char key[16] = {0};
+    CHECK_EQ(sscanf(approved,
+                    "Station request #%u approved. Station key #%u for "
+                    "'%31[^']': %15s",
+                    &parsed_request_id, &key_id, name, key),
+             4);
+    CHECK_EQ(parsed_request_id, approve_id);
+    CHECK_STR_EQ(name, "ApprovalTarget");
+    CHECK(ddial_station_key_is_wellformed(key));
+    CHECK_EQ(ddial_hub_key_match(g_host, key, NULL, 0U), key_id);
+
+    CHECK_EQ(host_ddial_hub_request_list(g_host, listing, sizeof(listing)), 1U);
+    CHECK(strstr(listing, "ApprovalTarget") == NULL);
+    CHECK(strstr(listing, "DenyTarget") != NULL);
+
+    snprintf(command, sizeof(command), "/ddial deny #%u", deny_id);
+    CHECK(command_output_as(command, true, output, sizeof(output)));
+    char expected[128];
+    snprintf(expected, sizeof(expected), "Station request #%u denied.", deny_id);
+    CHECK(strstr(output, expected) != NULL);
+    CHECK(command_output_as("/ddial requests", true, output, sizeof(output)));
+    CHECK(strstr(output, "No pending station requests.") != NULL);
+
+    CHECK(command_output_as("/ddial approve nope", true, output,
+                            sizeof(output)));
+    CHECK(strstr(output, "Usage: /ddial approve <request-id>") != NULL);
+    CHECK(command_output_as("/ddial deny 9999", true, output, sizeof(output)));
+    CHECK(strstr(output, "No station request with that id.") != NULL);
+
+    fp = fopen(path, "r");
+    CHECK(fp != NULL);
+    memset(contents, 0, sizeof(contents));
+    n = fread(contents, 1U, sizeof(contents) - 1U, fp);
+    fclose(fp);
+    contents[n] = '\0';
+    CHECK(strstr(contents, "ApprovalTarget") == NULL);
+    CHECK(strstr(contents, "DenyTarget") == NULL);
+    memset(key, 0, sizeof(key));
+}
+
 TEST(failed_logins_block_an_address)
 {
     const char *ip = "192.0.2.77";
@@ -611,6 +717,26 @@ TEST(station_links_with_key_and_relays_chat)
     setenv("CHATTER_DDIAL_HUB_LISTEN", spec, 1);
     setenv("CHATTER_DDIAL_STATION", "TestHub", 1);
     host_ddial_hub_start(g_host);
+
+    int request_fd = connect_loopback(port);
+    CHECK(request_fd >= 0);
+    char request_buf[1024] = {0};
+    CHECK(read_until(request_fd, "Enter Password", request_buf,
+                     sizeof(request_buf), 3000));
+    ddial_hub_write_text(request_fd, "@request:WireRequest\r\n");
+    request_buf[0] = '\0';
+    CHECK(read_until(request_fd, "Station link request #", request_buf,
+                     sizeof(request_buf), 3000));
+    close(request_fd);
+    char request_listing[1024];
+    CHECK_EQ(host_ddial_hub_request_list(g_host, request_listing,
+                                         sizeof(request_listing)),
+             1U);
+    CHECK(strstr(request_listing, "WireRequest [127.0.0.1]") != NULL);
+    unsigned request_id = 0U;
+    CHECK_EQ(sscanf(request_listing, "#%u", &request_id), 1);
+    CHECK_EQ(host_ddial_hub_request_deny(g_host, request_id),
+             DDIAL_HUB_REQUEST_OK);
 
     char key[DDIAL_STATION_KEY_LEN + 1U];
     unsigned id = 0U;
@@ -843,6 +969,10 @@ static void remove_dir_files(const char *dir)
     unlink(path);
     snprintf(path, sizeof(path), "%s/ddial_station_keys.tsv.tmp", dir);
     unlink(path);
+    snprintf(path, sizeof(path), "%s/ddial_station_requests.dat", dir);
+    unlink(path);
+    snprintf(path, sizeof(path), "%s/ddial_station_requests.dat.tmp", dir);
+    unlink(path);
     rmdir(dir);
 }
 
@@ -869,6 +999,7 @@ int main(void)
     RUN_TEST(thread_command_rejects_bad_targets_without_mutation);
     RUN_TEST(full_reply_table_drops_the_oldest);
     RUN_TEST(station_key_create_match_revoke);
+    RUN_TEST(station_request_workflow_persists_and_manages_requests);
     RUN_TEST(failed_logins_block_an_address);
     RUN_TEST(station_links_with_key_and_relays_chat);
     RUN_TEST(scrollback_entry_visibility_check);
