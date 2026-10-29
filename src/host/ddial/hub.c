@@ -10,7 +10,9 @@
  *   1. The station connects to CHATTER_DDIAL_HUB_LISTEN ([addr:]port).
  *   2. We print "Enter Password or [RETURN]: ".
  *   3. The station sends a station key: nine digits generated here with
- *      /ddial key new <label> and handed to that station's operator.
+ *      /ddial key new <label> or /ddial approve <request-id> and handed to
+ *      that station's operator. A station without a key can instead send
+ *      @request:<name>, which is persisted in ddial_station_requests.dat.
  *      Keys are stored as PBKDF2 hashes in ddial_station_keys.tsv; the
  *      plain key is shown only once, when it is created.
  *   4. On a valid key we answer "Welcome to <station> station link", the
@@ -58,6 +60,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -67,6 +70,8 @@
 /* Link lines handed to stations start here, well above dial-in lines. */
 #define DDIAL_HUB_FIRST_SLOT 60U
 #define DDIAL_HUB_MAX_KEYS 64U
+#define DDIAL_HUB_MAX_REQUESTS 64U
+#define DDIAL_HUB_REQUEST_REFRESH_SEC 60
 #define DDIAL_HUB_LOGIN_TIMEOUT_SEC 30
 #define DDIAL_HUB_POLL_MS 1000
 /* Brute-force guard: after this many bad keys from one address within the
@@ -84,6 +89,20 @@ typedef struct ddial_hub_key {
     int64_t created;
     int64_t last_used;
 } ddial_hub_key_t;
+
+typedef struct ddial_hub_request {
+    unsigned id;
+    char name[DDIAL_MAX_HANDLE_LEN];
+    char ip[SSH_CHATTER_IP_LEN];
+    int64_t created;
+    int64_t last_seen;
+} ddial_hub_request_t;
+
+typedef enum ddial_hub_request_result {
+    DDIAL_HUB_REQUEST_ERROR = -1,
+    DDIAL_HUB_REQUEST_NOT_FOUND = 0,
+    DDIAL_HUB_REQUEST_OK = 1,
+} ddial_hub_request_result_t;
 
 typedef struct ddial_hub_station {
     struct ddial_hub_station *next;
@@ -117,6 +136,11 @@ static size_t g_ddial_hub_key_count = 0U;
 static unsigned g_ddial_hub_next_key_id = 1U;
 static bool g_ddial_hub_keys_loaded = false;
 static char g_ddial_hub_key_path[PATH_MAX];
+static ddial_hub_request_t g_ddial_hub_requests[DDIAL_HUB_MAX_REQUESTS];
+static size_t g_ddial_hub_request_count = 0U;
+static unsigned g_ddial_hub_next_request_id = 1U;
+static bool g_ddial_hub_requests_loaded = false;
+static char g_ddial_hub_request_path[PATH_MAX];
 static ddial_hub_failure_t g_ddial_hub_failures[DDIAL_HUB_FAIL_TRACK];
 
 typedef struct ddial_hub_listener {
@@ -297,9 +321,9 @@ static bool ddial_hub_random_key(char out[DDIAL_STATION_KEY_LEN + 1U])
 
 /* Create a key for a station.  out_key receives the plain key, which is
  * not stored and cannot be shown again. */
-static bool host_ddial_hub_key_create(host_t *host, const char *label,
-                                      char out_key[DDIAL_STATION_KEY_LEN + 1U],
-                                      unsigned *out_id)
+static bool ddial_hub_key_create_locked(
+    host_t *host, const char *label,
+    char out_key[DDIAL_STATION_KEY_LEN + 1U], unsigned *out_id)
 {
     if (host == nullptr || out_key == nullptr) {
         return false;
@@ -311,16 +335,14 @@ static bool host_ddial_hub_key_create(host_t *host, const char *label,
         snprintf(clean_label, sizeof(clean_label), "%s", "station");
     }
     for (char *p = clean_label; *p != '\0'; ++p) {
-        if (*p == '\t') {
+        if (*p == '\t' || *p == '\r' || *p == '\n') {
             *p = ' ';
         }
     }
 
-    pthread_mutex_lock(&g_ddial_hub_key_lock);
     ddial_hub_keys_load_locked(host);
     if (g_ddial_hub_key_count >= DDIAL_HUB_MAX_KEYS ||
         !ddial_hub_random_key(out_key)) {
-        pthread_mutex_unlock(&g_ddial_hub_key_lock);
         return false;
     }
     ddial_hub_key_t key;
@@ -335,12 +357,307 @@ static bool host_ddial_hub_key_create(host_t *host, const char *label,
     if (!saved) {
         --g_ddial_hub_key_count;
         --g_ddial_hub_next_key_id;
-    }
-    pthread_mutex_unlock(&g_ddial_hub_key_lock);
-    if (saved && out_id != nullptr) {
+    } else if (out_id != nullptr) {
         *out_id = key.id;
     }
     return saved;
+}
+
+static bool host_ddial_hub_key_create(host_t *host, const char *label,
+                                      char out_key[DDIAL_STATION_KEY_LEN + 1U],
+                                      unsigned *out_id)
+{
+    pthread_mutex_lock(&g_ddial_hub_key_lock);
+    bool created =
+        ddial_hub_key_create_locked(host, label, out_key, out_id);
+    pthread_mutex_unlock(&g_ddial_hub_key_lock);
+    return created;
+}
+
+/* ---- station link requests ---------------------------------------------- */
+
+static void ddial_hub_requests_load_locked(host_t *host)
+{
+    if (g_ddial_hub_requests_loaded || host == nullptr) {
+        return;
+    }
+    g_ddial_hub_requests_loaded = true;
+
+    const char *root =
+        host->user_data_root[0] != '\0' ? host->user_data_root : ".";
+    const char *override = getenv("CHATTER_DDIAL_MEMBERS_DIR");
+    if (override != nullptr && override[0] != '\0') {
+        root = override;
+    }
+    snprintf(g_ddial_hub_request_path, sizeof(g_ddial_hub_request_path),
+             "%s/ddial_station_requests.dat", root);
+
+    FILE *fp = fopen(g_ddial_hub_request_path, "r");
+    if (fp == nullptr) {
+        return;
+    }
+    char line[512];
+    while (fgets(line, sizeof(line), fp) != nullptr &&
+           g_ddial_hub_request_count < DDIAL_HUB_MAX_REQUESTS) {
+        line[strcspn(line, "\r\n")] = '\0';
+        unsigned next_id = 0U;
+        if (sscanf(line, "# next_id %u", &next_id) == 1) {
+            if (next_id > g_ddial_hub_next_request_id) {
+                g_ddial_hub_next_request_id = next_id;
+            }
+            continue;
+        }
+        char *fields[5] = {nullptr};
+        char *save = nullptr;
+        size_t count = 0U;
+        for (char *tok = strtok_r(line, "\t", &save);
+             tok != nullptr && count < 5U;
+             tok = strtok_r(nullptr, "\t", &save)) {
+            fields[count++] = tok;
+        }
+        if (count < 5U) {
+            continue;
+        }
+        ddial_hub_request_t request;
+        memset(&request, 0, sizeof(request));
+        request.id = (unsigned)strtoul(fields[0], nullptr, 10);
+        if (request.id == 0U ||
+            ddial_sanitize_handle(fields[1], strlen(fields[1]), request.name,
+                                  sizeof(request.name)) == 0U ||
+            fields[2][0] == '\0') {
+            continue;
+        }
+        snprintf(request.ip, sizeof(request.ip), "%s", fields[2]);
+        request.created = strtoll(fields[3], nullptr, 10);
+        request.last_seen = strtoll(fields[4], nullptr, 10);
+        g_ddial_hub_requests[g_ddial_hub_request_count++] = request;
+        if (request.id >= g_ddial_hub_next_request_id) {
+            g_ddial_hub_next_request_id = request.id + 1U;
+        }
+    }
+    fclose(fp);
+}
+
+static bool ddial_hub_requests_save_locked(void)
+{
+    if (g_ddial_hub_request_path[0] == '\0') {
+        return false;
+    }
+    char temp_path[PATH_MAX];
+    int written = snprintf(temp_path, sizeof(temp_path), "%s.tmp",
+                           g_ddial_hub_request_path);
+    if (written < 0 || (size_t)written >= sizeof(temp_path)) {
+        return false;
+    }
+    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW,
+                  S_IRUSR | S_IWUSR);
+    if (fd < 0) {
+        return false;
+    }
+    FILE *fp = fdopen(fd, "w");
+    if (fp == nullptr) {
+        close(fd);
+        unlink(temp_path);
+        return false;
+    }
+    bool ok = fprintf(fp, "# next_id %u\n", g_ddial_hub_next_request_id) > 0;
+    for (size_t i = 0U; i < g_ddial_hub_request_count && ok; ++i) {
+        const ddial_hub_request_t *request = &g_ddial_hub_requests[i];
+        ok = fprintf(fp, "%u\t%s\t%s\t%lld\t%lld\n", request->id, request->name,
+                     request->ip, (long long)request->created,
+                     (long long)request->last_seen) > 0;
+    }
+    if (fflush(fp) != 0 || fsync(fileno(fp)) != 0) {
+        ok = false;
+    }
+    if (fclose(fp) != 0) {
+        ok = false;
+    }
+    if (!ok || rename(temp_path, g_ddial_hub_request_path) != 0) {
+        unlink(temp_path);
+        return false;
+    }
+    return true;
+}
+
+static bool host_ddial_hub_request_register(host_t *host, const char *name,
+                                            const char *ip, unsigned *out_id)
+{
+    if (host == nullptr || name == nullptr) {
+        return false;
+    }
+    char clean_name[DDIAL_MAX_HANDLE_LEN];
+    snprintf(clean_name, sizeof(clean_name), "%s", name);
+    for (char *p = clean_name; *p != '\0'; ++p) {
+        if (*p == '\t' || *p == '\r' || *p == '\n') {
+            *p = ' ';
+        }
+    }
+    trim_whitespace_inplace(clean_name);
+    char sanitized[DDIAL_MAX_HANDLE_LEN];
+    if (ddial_sanitize_handle(clean_name, strlen(clean_name), sanitized,
+                              sizeof(sanitized)) == 0U) {
+        return false;
+    }
+
+    pthread_mutex_lock(&g_ddial_hub_key_lock);
+    ddial_hub_requests_load_locked(host);
+    int64_t now = (int64_t)time(nullptr);
+    for (size_t i = 0U; i < g_ddial_hub_request_count; ++i) {
+        ddial_hub_request_t *request = &g_ddial_hub_requests[i];
+        if (strcmp(request->ip, ip != nullptr ? ip : "") == 0 &&
+            ddial_handles_equal(request->name, sanitized)) {
+            if (out_id != nullptr) {
+                *out_id = request->id;
+            }
+            bool saved = true;
+            if (now - request->last_seen >= DDIAL_HUB_REQUEST_REFRESH_SEC) {
+                int64_t previous = request->last_seen;
+                request->last_seen = now;
+                saved = ddial_hub_requests_save_locked();
+                if (!saved) {
+                    request->last_seen = previous;
+                }
+            }
+            pthread_mutex_unlock(&g_ddial_hub_key_lock);
+            return saved;
+        }
+    }
+    if (g_ddial_hub_request_count >= DDIAL_HUB_MAX_REQUESTS) {
+        pthread_mutex_unlock(&g_ddial_hub_key_lock);
+        return false;
+    }
+
+    ddial_hub_request_t request;
+    memset(&request, 0, sizeof(request));
+    request.id = g_ddial_hub_next_request_id++;
+    snprintf(request.name, sizeof(request.name), "%s", sanitized);
+    snprintf(request.ip, sizeof(request.ip), "%s", ip != nullptr ? ip : "");
+    request.created = now;
+    request.last_seen = now;
+    g_ddial_hub_requests[g_ddial_hub_request_count++] = request;
+    bool saved = ddial_hub_requests_save_locked();
+    if (!saved) {
+        --g_ddial_hub_request_count;
+        --g_ddial_hub_next_request_id;
+    } else if (out_id != nullptr) {
+        *out_id = request.id;
+    }
+    pthread_mutex_unlock(&g_ddial_hub_key_lock);
+    return saved;
+}
+
+static size_t host_ddial_hub_request_list(host_t *host, char *out, size_t cap)
+{
+    if (out == nullptr || cap == 0U) {
+        return 0U;
+    }
+    out[0] = '\0';
+    size_t used = 0U;
+    pthread_mutex_lock(&g_ddial_hub_key_lock);
+    ddial_hub_requests_load_locked(host);
+    size_t count = g_ddial_hub_request_count;
+    for (size_t i = 0U; i < count && used + 1U < cap; ++i) {
+        const ddial_hub_request_t *request = &g_ddial_hub_requests[i];
+        int n = snprintf(out + used, cap - used, "%s#%u %s [%s]",
+                         used > 0U ? "\n" : "", request->id, request->name,
+                         request->ip);
+        if (n < 0 || (size_t)n >= cap - used) {
+            break;
+        }
+        used += (size_t)n;
+    }
+    pthread_mutex_unlock(&g_ddial_hub_key_lock);
+    return count;
+}
+
+static size_t ddial_hub_request_find_locked(unsigned id)
+{
+    for (size_t i = 0U; i < g_ddial_hub_request_count; ++i) {
+        if (g_ddial_hub_requests[i].id == id) {
+            return i;
+        }
+    }
+    return g_ddial_hub_request_count;
+}
+
+static void ddial_hub_request_restore_locked(size_t idx,
+                                             const ddial_hub_request_t *request)
+{
+    memmove(&g_ddial_hub_requests[idx + 1U], &g_ddial_hub_requests[idx],
+            (g_ddial_hub_request_count - idx) *
+                sizeof(g_ddial_hub_requests[0]));
+    g_ddial_hub_requests[idx] = *request;
+    ++g_ddial_hub_request_count;
+}
+
+static ddial_hub_request_result_t
+host_ddial_hub_request_deny(host_t *host, unsigned id)
+{
+    if (host == nullptr) {
+        return DDIAL_HUB_REQUEST_ERROR;
+    }
+    pthread_mutex_lock(&g_ddial_hub_key_lock);
+    ddial_hub_requests_load_locked(host);
+    size_t idx = ddial_hub_request_find_locked(id);
+    if (idx == g_ddial_hub_request_count) {
+        pthread_mutex_unlock(&g_ddial_hub_key_lock);
+        return DDIAL_HUB_REQUEST_NOT_FOUND;
+    }
+    ddial_hub_request_t request = g_ddial_hub_requests[idx];
+    memmove(&g_ddial_hub_requests[idx], &g_ddial_hub_requests[idx + 1U],
+            (g_ddial_hub_request_count - idx - 1U) *
+                sizeof(g_ddial_hub_requests[0]));
+    --g_ddial_hub_request_count;
+    bool saved = ddial_hub_requests_save_locked();
+    if (!saved) {
+        ddial_hub_request_restore_locked(idx, &request);
+    }
+    pthread_mutex_unlock(&g_ddial_hub_key_lock);
+    return saved ? DDIAL_HUB_REQUEST_OK : DDIAL_HUB_REQUEST_ERROR;
+}
+
+static ddial_hub_request_result_t host_ddial_hub_request_approve(
+    host_t *host, unsigned id, char out_name[DDIAL_MAX_HANDLE_LEN],
+    char out_key[DDIAL_STATION_KEY_LEN + 1U], unsigned *out_key_id)
+{
+    if (host == nullptr || out_name == nullptr || out_key == nullptr) {
+        return DDIAL_HUB_REQUEST_ERROR;
+    }
+    out_name[0] = '\0';
+    out_key[0] = '\0';
+
+    pthread_mutex_lock(&g_ddial_hub_key_lock);
+    ddial_hub_requests_load_locked(host);
+    size_t idx = ddial_hub_request_find_locked(id);
+    if (idx == g_ddial_hub_request_count) {
+        pthread_mutex_unlock(&g_ddial_hub_key_lock);
+        return DDIAL_HUB_REQUEST_NOT_FOUND;
+    }
+    ddial_hub_request_t request = g_ddial_hub_requests[idx];
+    if (!ddial_hub_key_create_locked(host, request.name, out_key, out_key_id)) {
+        pthread_mutex_unlock(&g_ddial_hub_key_lock);
+        return DDIAL_HUB_REQUEST_ERROR;
+    }
+
+    memmove(&g_ddial_hub_requests[idx], &g_ddial_hub_requests[idx + 1U],
+            (g_ddial_hub_request_count - idx - 1U) *
+                sizeof(g_ddial_hub_requests[0]));
+    --g_ddial_hub_request_count;
+    if (!ddial_hub_requests_save_locked()) {
+        ddial_hub_request_restore_locked(idx, &request);
+        --g_ddial_hub_key_count;
+        --g_ddial_hub_next_key_id;
+        if (!ddial_hub_keys_save_locked()) {
+            printf("[ddial-hub] failed to roll back approved station key\n");
+        }
+        memset(out_key, 0, DDIAL_STATION_KEY_LEN + 1U);
+        pthread_mutex_unlock(&g_ddial_hub_key_lock);
+        return DDIAL_HUB_REQUEST_ERROR;
+    }
+    snprintf(out_name, DDIAL_MAX_HANDLE_LEN, "%s", request.name);
+    pthread_mutex_unlock(&g_ddial_hub_key_lock);
+    return DDIAL_HUB_REQUEST_OK;
 }
 
 /* Id of the key matching candidate, or 0. Every key is checked so the time
@@ -984,6 +1301,26 @@ static void *ddial_hub_station_thread(void *arg)
                 break;
             }
             trim_whitespace_inplace(key);
+            if (strncasecmp(key, "@request:", 9U) == 0) {
+                unsigned request_id = 0U;
+                bool recorded = host_ddial_hub_request_register(
+                    host, key + 9, st->ip, &request_id);
+                memset(key, 0, sizeof(key));
+                if (!recorded) {
+                    ddial_hub_write_text(
+                        st->fd, "\r\nCould not record station link request.\r\n");
+                    break;
+                }
+                char response[128];
+                snprintf(response, sizeof(response),
+                         "\r\nStation link request #%u recorded; wait for "
+                         "operator approval.\r\n",
+                         request_id);
+                ddial_hub_write_text(st->fd, response);
+                printf("[ddial-hub] station request #%u recorded from %s\n",
+                       request_id, st->ip);
+                break;
+            }
             char label[DDIAL_MAX_HANDLE_LEN] = "";
             unsigned key_id = ddial_hub_key_match(host, key, label,
                                                   sizeof(label));

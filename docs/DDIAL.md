@@ -157,15 +157,29 @@ its own upstream hub:
 | `CHATTER_DDIAL_HUB_LISTEN` | `port` or `addr:port` (`[v6addr]:port`) to accept station links on. Unset = off. |
 | `CHATTER_DDIAL_STATION` | Name shown in the welcome line and the `}}}` user list. |
 
-Operators manage keys from the Chatter room:
+Operators manage requests and keys from the Chatter room:
 
-- `/ddial key new <station-name>` prints a new nine-digit station key.
-  **It is shown once.** Give it to that station's operator; it is their
-  link password (`CHATTER_DDIAL_KEY` on another ssh-chatter).
+- `/ddial requests` lists pending inbound station requests with their ids,
+  names and source addresses.
+- `/ddial approve <request-id>` prints a new nine-digit station key and
+  removes the request. **The key is shown once.** Give it to that station's
+  operator; it is their link password (`CHATTER_DDIAL_KEY` on another
+  ssh-chatter).
+- `/ddial deny <request-id>` removes a request without issuing a key.
+- `/ddial key new <station-name>` still creates a key directly when no
+  inbound request is needed.
 - `/ddial key list` shows each key's id, name, creation date and last use.
 - `/ddial key revoke <id>` deletes a key and drops a station linked with it.
   Ids are never reused.
 - `/ddial hub` lists the linked stations.
+
+A station without a key sends `@request:<station-name>` at the password
+prompt (for example, `CHATTER_DDIAL_KEY='@request:RemoteOne'`). The hub
+records the request and closes that login attempt; the station can use the
+key after an operator approves it. Repeating a request from the same address
+and name keeps its original id. Pending requests are stored in
+`ddial_station_requests.dat` next to the member files and rewritten
+atomically whenever they change.
 
 Keys are stored as PBKDF2-SHA256 hashes in `ddial_station_keys.tsv` next to
 the member files (mode 0600).
