@@ -480,6 +480,7 @@ static void host_state_apply_preference_entry(
              sizeof(pref->input_translation_language), "%s",
              serialized->input_translation_language);
     pref->breaking_alerts_enabled = serialized->breaking_alerts_enabled != 0U;
+    pref->multilingual_route_enabled = serialized->reserved2[0] != 0U;
     snprintf(pref->provider_label, sizeof(pref->provider_label), "%s",
              serialized->provider_label);
     ++host->preference_count;

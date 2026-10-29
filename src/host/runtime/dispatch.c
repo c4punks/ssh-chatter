@@ -286,6 +286,17 @@ static void session_dispatch_command(session_ctx_t *ctx, const char *line)
         return;
     }
 
+    else if (session_parse_command_any(ctx, "/room", effective_line, &args)) {
+        session_handle_room(ctx, args);
+        return;
+    }
+
+    else if (session_parse_command_any(ctx, "/multilingual-route",
+                                       effective_line, &args)) {
+        session_handle_multilingual_route(ctx, args);
+        return;
+    }
+
     else if (session_parse_command_any(ctx, "/image", effective_line, &args)) {
         session_handle_image(ctx, args);
         return;

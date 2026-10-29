@@ -372,6 +372,7 @@ static void session_apply_saved_preferences(session_ctx_t *ctx)
     ctx->input_translation_language[0] = '\0';
     ctx->last_detected_input_language[0] = '\0';
     ctx->breaking_alerts_enabled = false;
+    ctx->multilingual_route_enabled = false;
 
     if (has_base_snapshot) {
         if (base_snapshot.ui_language[0] != '\0') {
@@ -506,6 +507,7 @@ static void session_apply_saved_preferences(session_ctx_t *ctx)
                  sizeof(ctx->input_translation_language), "%s",
                  base_snapshot.input_translation_language);
         ctx->breaking_alerts_enabled = base_snapshot.breaking_alerts_enabled;
+        ctx->multilingual_route_enabled = base_snapshot.multilingual_route_enabled;
         snprintf(ctx->game.chosen_camouflage_language,
                  sizeof(ctx->game.chosen_camouflage_language), "%s",
                  base_snapshot.camouflage_language);

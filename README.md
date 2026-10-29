@@ -24,6 +24,7 @@ SSH-Chatter has started from a C reimplementation of the Go [`ssh-chat`](https:/
 - `/asciiart` live composer with a 640-line limit, a ten-minute per-IP cooldown, multi-line output, and keyboard shortcuts for cancelling with Ctrl+A and submitting with Ctrl+S or the locale-aware `>/__ARTWORK_END>` default.
 - `/birthday` to register birthdays, `/grant <ip>` so LAN operators can delegate privileges by address, and `/revoke <ip>` so top LAN admins can reclaim them.
 - Chat UI refresh with a clean divider between history and input, instant input clearing after send, and a friendly "Wait for a moment..." banner
+- Optional encoding-based chat rooms with `/multilingual-route on|off`: non-ASCII UTF-8 messages route to `UTF-8`, while legacy non-CP437 input routes to its codepage room (for example `CP949`). Rooms are created on first use and persist in history; `/room list` and `/room join <name>` navigate them.
 - Friendly multilingual captcha featuring easy comparisons and language-based name counts.
 - Expanded nickname support for non-Latin characters plus `/ban` upgrades that accept raw IP addresses alongside usernames.
 - `/weather <city>` for quick global forecasts.

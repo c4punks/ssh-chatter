@@ -640,6 +640,58 @@ static const session_help_entry_t kSessionHelpEssential[] = {
     },
     {
         .kind = SESSION_HELP_ENTRY_COMMAND,
+        .label = "room [list|join <room-name>]",
+        .description =
+            {
+                "Show the current room, list created encoding rooms, or join "
+                "main, UTF-8, CP949, CP932, CP936, CP1251, CP850, or CP852.",
+                "현재 방 보기, 생성된 인코딩 방 목록 보기, 또는 main, UTF-8, "
+                "CP949, CP932, CP936, CP1251, CP850, CP852 방에 참여합니다.",
+                "現在のルーム表示、作成済みエンコーディングルーム一覧、または "
+                "main, UTF-8, CP949, CP932, CP936, CP1251, CP850, CP852 への参加。",
+                "显示当前房间、列出已创建的编码房间，或加入 main、UTF-8、"
+                "CP949、CP932、CP936、CP1251、CP850、CP852。",
+                "Показать текущую или созданные кодировочные комнаты либо войти "
+                "в main, UTF-8, CP949, CP932, CP936, CP1251, CP850 или CP852.",
+                "Aktuellen Raum oder erstellte Encoding-Räume anzeigen bzw. "
+                "main, UTF-8, CP949, CP932, CP936, CP1251, CP850 oder CP852 "
+                "betreten.",
+                "Afficher le salon actuel ou les salons d'encodage créés, ou "
+                "rejoindre main, UTF-8, CP949, CP932, CP936, CP1251, CP850 ou "
+                "CP852.",
+                "Pokaż bieżący lub utworzone pokoje kodowania albo dołącz do "
+                "main, UTF-8, CP949, CP932, CP936, CP1251, CP850 lub CP852.",
+            },
+    },
+    {
+        .kind = SESSION_HELP_ENTRY_COMMAND,
+        .label = "multilingual-route on|off",
+        .description =
+            {
+                "Route non-ASCII messages to their input encoding's room. "
+                "ASCII and CP437 stay in the current room. Saved per user.",
+                "ASCII가 아닌 메시지를 입력 인코딩의 방으로 별냅니다. ASCII와 "
+                "CP437은 현재 방에 유지됩니다. 사용자별로 저장됩니다.",
+                "非 ASCII メッセージを入力エンコーディングのルームへ転送します。"
+                "ASCII と CP437 は現在のルームに残ります。ユーザーごとに保存。",
+                "将非 ASCII 消息路由到输入编码对应的房间。ASCII 和 CP437 留在"
+                "当前房间。按用户保存设置。",
+                "Перенаправлять не-ASCII сообщения в комнату входной кодировки. "
+                "ASCII и CP437 остаются в текущей комнате. Сохраняется для "
+                "каждого пользователя.",
+                "Nicht-ASCII-Nachrichten in den Raum der Eingabe-Codierung "
+                "leiten. ASCII und CP437 bleiben im aktuellen Raum. Wird pro "
+                "Benutzer gespeichert.",
+                "Rediriger les messages non ASCII vers le salon de leur encodage "
+                "d'entrée. ASCII et CP437 restent dans le salon actuel. Réglage "
+                "enregistré par utilisateur.",
+                "Przekierowuj wiadomości nie-ASCII do pokoju kodowania wejścia. "
+                "ASCII i CP437 pozostają w bieżącym pokoju. Ustawienie zapisywane "
+                "dla każdego użytkownika.",
+            },
+    },
+    {
+        .kind = SESSION_HELP_ENTRY_COMMAND,
         .label = "pm <username>|<message>",
         .description =
             {

@@ -1326,6 +1326,18 @@ static void session_deliver_outgoing_message(session_ctx_t *ctx,
     if (!host_history_record_user(ctx->owner, ctx, trimmed, false, &entry)) {
         return;
     }
+    uint8_t current_room = atomic_load(&ctx->current_room);
+    if (entry.room_id != current_room) {
+        const char *room_name = session_chat_room_name(entry.room_id);
+        if (room_name != nullptr) {
+            char notice[SSH_CHATTER_MESSAGE_LIMIT];
+            session_command_snprintf(
+                ctx, notice, sizeof(notice),
+                "Message routed to %s. Use /room join %s to follow that room.",
+                room_name, room_name);
+            session_send_system_line(ctx, notice);
+        }
+    }
 
     if (ctx->chat_message_count < SIZE_MAX) {
         ttak_mutex_lock(&ctx->chat_message_count_mutex);
@@ -1386,7 +1398,9 @@ static void session_deliver_outgoing_message(session_ctx_t *ctx,
     }
 
     (void)host_eliza_intervene(ctx, trimmed, nullptr, false);
-    host_ai_route_public(ctx->owner, entry.username, entry.message);
+    if (entry.room_id == CHAT_ROOM_MAIN) {
+        host_ai_route_public(ctx->owner, entry.username, entry.message);
+    }
 
     size_t message_length = strnlen(trimmed, SSH_CHATTER_MESSAGE_LIMIT);
 

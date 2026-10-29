@@ -303,6 +303,11 @@ typedef enum session_ui_language {
     SESSION_UI_LANGUAGE_COUNT
 } session_ui_language_t;
 
+#define CHAT_ROOM_MAIN 0U
+#define CHAT_ROOM_UTF8 1U
+#define CHAT_ROOM_CP437 2U
+#define CHAT_ROOM_MAX_ID 8U
+
 typedef struct chat_history_entry {
     bool is_user_message;
     bool preserve_whitespace;
@@ -322,6 +327,7 @@ typedef struct chat_history_entry {
     char attachment_caption[SSH_CHATTER_ATTACHMENT_CAPTION_LEN];
     time_t created_at;
     session_ui_language_t sender_ui_language;
+    uint8_t room_id;
     uint32_t reaction_counts[SSH_CHATTER_REACTION_KIND_COUNT];
 } chat_history_entry_t;
 
@@ -882,6 +888,10 @@ typedef struct session_ctx {
     bool cp437_input_enabled;
     session_codepage_t active_codepage;
     session_codepage_context_t codepage_ctx;
+    _Atomic uint8_t current_room;
+    bool multilingual_route_enabled;
+    bool multilingual_route_override_active;
+    uint8_t multilingual_route_override;
     bool translation_enabled;
     bool output_translation_enabled;
     char output_translation_language[SSH_CHATTER_LANG_NAME_LEN];
@@ -1037,6 +1047,7 @@ typedef struct user_preference {
     char input_translation_language[SSH_CHATTER_LANG_NAME_LEN];
     char ui_language[SSH_CHATTER_LANG_NAME_LEN];
     bool breaking_alerts_enabled;
+    bool multilingual_route_enabled;
     char provider_label[SSH_CHATTER_PROVIDER_LABEL_LEN];
     char camouflage_language[SSH_CHATTER_CAMOUFLAGE_LANGUAGE_LEN];
     bool show_continuous_messages;

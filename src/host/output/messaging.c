@@ -837,6 +837,10 @@ static bool session_should_hide_entry(session_ctx_t *ctx,
         return false;
     }
 
+    if (atomic_load(&ctx->current_room) != entry->room_id) {
+        return true;
+    }
+
     if (!entry->is_user_message) {
         if (!host_ddial_display_view(entry, nullptr, nullptr)) {
             return true;
