@@ -1349,17 +1349,26 @@ static bool host_archive_append_entry(host_t *host,
         return false;
     }
 
-    bool existed = (access(path, F_OK) == 0);
-    FILE *fp = fopen(path, "r+b");
-    if (fp == nullptr) {
-        fp = fopen(path, "wb");
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW,
+                  S_IRUSR | S_IWUSR);
+    if (fd < 0) {
+        return false;
     }
+
+    struct stat file_stat;
+    if (fstat(fd, &file_stat) != 0 || !S_ISREG(file_stat.st_mode)) {
+        close(fd);
+        return false;
+    }
+
+    FILE *fp = fdopen(fd, "r+b");
     if (fp == nullptr) {
+        close(fd);
         return false;
     }
 
     uint32_t history_count = 0U;
-    if (existed) {
+    if (file_stat.st_size > 0) {
         host_state_header_v1_t base_header = {0};
         if (fread(&base_header, sizeof(base_header), 1U, fp) == 1U &&
             base_header.magic == HOST_STATE_MAGIC &&
@@ -1394,14 +1403,12 @@ static bool host_archive_append_entry(host_t *host,
     fseeko(fp, offsetof(host_state_header_v1_t, history_count), SEEK_SET);
     fwrite(&history_count, sizeof(history_count), 1U, fp);
 
-    fflush(fp);
-    int fd = fileno(fp);
-    if (fd >= 0) {
-        fsync(fd);
+    bool ok = fflush(fp) == 0 && fchmod(fd, S_IRUSR | S_IWUSR) == 0 &&
+              fsync(fd) == 0;
+    if (fclose(fp) != 0) {
+        ok = false;
     }
-    fclose(fp);
-    chmod(path, S_IRUSR | S_IWUSR);
-    return true;
+    return ok;
 }
 
 size_t host_archive_read_date(host_t *host, const char *date_str,
@@ -3277,9 +3284,11 @@ static bool host_ensure_private_data_path(host_t *host, const char *path,
 
     char parent_path[PATH_MAX];
     snprintf(parent_path, sizeof(parent_path), "%s", parent_dir);
+    const char *leaf = strrchr(path, '/');
+    leaf = leaf != nullptr ? leaf + 1 : path;
 
-    struct stat dir_stat;
-    if (stat(parent_path, &dir_stat) != 0) {
+    int parent_fd = open(parent_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (parent_fd < 0) {
         if (!(create_directories && errno == ENOENT)) {
             humanized_log_error("host", "failed to inspect data directory",
                                 errno != 0 ? errno : EIO);
@@ -3292,16 +3301,20 @@ static bool host_ensure_private_data_path(host_t *host, const char *path,
             return false;
         }
 
-        if (stat(parent_path, &dir_stat) != 0) {
+        parent_fd = open(parent_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (parent_fd < 0) {
             humanized_log_error("host", "failed to inspect data directory",
                                 errno != 0 ? errno : EIO);
             return false;
         }
     }
 
-    if (!S_ISDIR(dir_stat.st_mode)) {
+    struct stat dir_stat;
+    if (fstat(parent_fd, &dir_stat) != 0 || !S_ISDIR(dir_stat.st_mode)) {
+        int saved_errno = errno;
+        close(parent_fd);
         humanized_log_error("host", "data path parent is not a directory",
-                            ENOTDIR);
+                            saved_errno != 0 ? saved_errno : ENOTDIR);
         return false;
     }
 
@@ -3311,13 +3324,16 @@ static bool host_ensure_private_data_path(host_t *host, const char *path,
     if (insecure_bits != 0U) {
         if (!is_dot && !is_root) {
             mode_t tightened = dir_stat.st_mode & (mode_t) ~(S_IWOTH | S_IWGRP);
-            if (chmod(parent_path, tightened) != 0) {
+            if (fchmod(parent_fd, tightened) != 0) {
+                int saved_errno = errno;
+                close(parent_fd);
                 humanized_log_error(
                     "host", "failed to tighten data directory permissions",
-                    errno != 0 ? errno : EACCES);
+                    saved_errno != 0 ? saved_errno : EACCES);
                 return false;
             }
         } else {
+            close(parent_fd);
             humanized_log_error(
                 "host", "data directory permissions are too loose", EACCES);
             return false;
@@ -3325,7 +3341,9 @@ static bool host_ensure_private_data_path(host_t *host, const char *path,
     }
 
     struct stat file_stat;
-    int state_fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    int state_fd = openat(parent_fd, leaf, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    int state_errno = errno;
+    close(parent_fd);
     if (state_fd >= 0) {
         if (fstat(state_fd, &file_stat) != 0) {
             int saved_errno = errno;
@@ -3362,9 +3380,9 @@ static bool host_ensure_private_data_path(host_t *host, const char *path,
         }
 
         close(state_fd);
-    } else if (errno != ENOENT) {
+    } else if (state_errno != ENOENT) {
         humanized_log_error("host", "failed to inspect bbs state path",
-                            errno != 0 ? errno : EIO);
+                            state_errno != 0 ? state_errno : EIO);
         return false;
     }
 

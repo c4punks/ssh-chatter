@@ -82,12 +82,12 @@ static bool host_persist_write_atomic(host_t *host, const char *path,
     if (ok && payload_len > 0U) {
         ok = fwrite(payload, payload_len, 1U, fp) == 1U;
     }
+    ok = ok && fchmod(fileno(fp), S_IRUSR | S_IWUSR) == 0;
     ok = ok && fflush(fp) == 0 && fsync(fileno(fp)) == 0;
     if (fclose(fp) != 0) {
         ok = false;
     }
     if (ok) {
-        (void)chmod(temp_path, S_IRUSR | S_IWUSR);
         ok = rename(temp_path, path) == 0;
     }
     if (!ok) {

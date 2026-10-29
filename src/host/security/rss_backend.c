@@ -529,7 +529,8 @@ static void host_rss_state_save_locked(host_t *host)
 
     if (success) {
         int descriptor = fileno(fp);
-        if (descriptor >= 0 && fsync(descriptor) != 0) {
+        if (descriptor < 0 || fchmod(descriptor, S_IRUSR | S_IWUSR) != 0 ||
+            fsync(descriptor) != 0) {
             success = false;
         }
     }
@@ -545,21 +546,10 @@ static void host_rss_state_save_locked(host_t *host)
         return;
     }
 
-    if (chmod(temp_path, S_IRUSR | S_IWUSR) != 0) {
-        humanized_log_error("host",
-                            "failed to tighten temporary rss state permissions",
-                            errno != 0 ? errno : EACCES);
-        unlink(temp_path);
-        return;
-    }
-
     if (rename(temp_path, host->rss_state_file_path) != 0) {
         humanized_log_error("host", "failed to update rss state file",
                             errno != 0 ? errno : EIO);
         unlink(temp_path);
-    } else if (chmod(host->rss_state_file_path, S_IRUSR | S_IWUSR) != 0) {
-        humanized_log_error("host", "failed to tighten rss state permissions",
-                            errno != 0 ? errno : EACCES);
     }
 }
 

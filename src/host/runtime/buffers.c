@@ -163,12 +163,12 @@ static bool host_cold_blob_save(const char *path, const void *data,
     bool ok = fwrite(&header, sizeof(header), 1U, fp) == 1U &&
               fwrite(compressed, 1U, (size_t)compressed_len, fp) ==
                   (size_t)compressed_len;
+    ok = ok && fchmod(fileno(fp), S_IRUSR | S_IWUSR) == 0;
     ok = ok && fflush(fp) == 0 && fsync(fileno(fp)) == 0;
     if (fclose(fp) != 0) {
         ok = false;
     }
     if (ok) {
-        (void)chmod(temp_path, S_IRUSR | S_IWUSR);
         ok = rename(temp_path, path) == 0;
     }
     if (!ok) {

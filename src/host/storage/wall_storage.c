@@ -133,7 +133,9 @@ static void host_wall_state_save_locked(host_t *host)
     }
     if (success) {
         int file_descriptor = fileno(fp);
-        if (file_descriptor >= 0 && fsync(file_descriptor) != 0) {
+        if (file_descriptor < 0 ||
+            fchmod(file_descriptor, S_IRUSR | S_IWUSR) != 0 ||
+            fsync(file_descriptor) != 0) {
             success = false;
         }
     }
@@ -148,21 +150,10 @@ static void host_wall_state_save_locked(host_t *host)
         return;
     }
 
-    if (chmod(temp_path, S_IRUSR | S_IWUSR) != 0) {
-        humanized_log_error("wall",
-                            "failed to tighten temporary wall permissions",
-                            errno != 0 ? errno : EACCES);
-        unlink(temp_path);
-        return;
-    }
-
     /* rename() is atomic on the same filesystem. */
     if (rename(temp_path, host->wall_state_file_path) != 0) {
         humanized_log_error("wall", "failed to update wall state file", errno);
         unlink(temp_path);
-    } else if (chmod(host->wall_state_file_path, S_IRUSR | S_IWUSR) != 0) {
-        humanized_log_error("wall", "failed to tighten wall state permissions",
-                            errno != 0 ? errno : EACCES);
     }
 }
 

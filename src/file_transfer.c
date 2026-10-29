@@ -782,6 +782,34 @@ static bool file_storage_locate_single_file(const char *root,
     return count == 1U;
 }
 
+static void file_storage_remove_tree_at(int parent_fd, const char *name)
+{
+    int dir_fd = openat(parent_fd, name,
+                        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (dir_fd < 0) {
+        (void)unlinkat(parent_fd, name, 0);
+        return;
+    }
+
+    DIR *dir = fdopendir(dir_fd);
+    if (dir == nullptr) {
+        close(dir_fd);
+        return;
+    }
+
+    struct dirent *entry = nullptr;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (strcmp(entry->d_name, ".") == 0 ||
+            strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        file_storage_remove_tree_at(dir_fd, entry->d_name);
+    }
+
+    closedir(dir);
+    (void)unlinkat(parent_fd, name, AT_REMOVEDIR);
+}
+
 static void file_storage_remove_tree(const char *root)
 {
     if (root == nullptr || root[0] == '\0') {
@@ -794,28 +822,14 @@ static void file_storage_remove_tree(const char *root)
         return;
     }
 
+    int dir_fd = dirfd(dir);
     struct dirent *entry = nullptr;
     while ((entry = readdir(dir)) != nullptr) {
         if (strcmp(entry->d_name, ".") == 0 ||
             strcmp(entry->d_name, "..") == 0) {
             continue;
         }
-
-        char path[PATH_MAX];
-        if (!path_buffer_join(path, sizeof(path), root, entry->d_name)) {
-            continue;
-        }
-
-        struct stat st;
-        if (lstat(path, &st) != 0) {
-            continue;
-        }
-
-        if (S_ISDIR(st.st_mode)) {
-            file_storage_remove_tree(path);
-        } else {
-            unlink(path);
-        }
+        file_storage_remove_tree_at(dir_fd, entry->d_name);
     }
 
     closedir(dir);
@@ -1126,13 +1140,21 @@ static int scp_handle_upload(session_ctx_t *ctx, const char *real_path)
 
 static int scp_handle_download(session_ctx_t *ctx, const char *real_path)
 {
+    int fd = open(real_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+        scp_send_status(ctx, 2, "File not found.");
+        return -1;
+    }
+
     struct stat st;
-    if (stat(real_path, &st) != 0 || !S_ISREG(st.st_mode)) {
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
         scp_send_status(ctx, 2, "File not found.");
         return -1;
     }
 
     if (!scp_expect_ok(ctx)) {
+        close(fd);
         return -1;
     }
 
@@ -1145,16 +1167,12 @@ static int scp_handle_download(session_ctx_t *ctx, const char *real_path)
                               (long long)st.st_size, basename_ptr);
     if (header_len <= 0 ||
         !scp_channel_write_all(ctx, header, (size_t)header_len)) {
+        close(fd);
         return -1;
     }
 
     if (!scp_expect_ok(ctx)) {
-        return -1;
-    }
-
-    int fd = open(real_path, O_RDONLY);
-    if (fd < 0) {
-        scp_send_status(ctx, 2, "Unable to read file.");
+        close(fd);
         return -1;
     }
 

@@ -302,6 +302,70 @@ TEST(login_is_password_command_masking)
     CHECK(!session_is_password_command("/signupp"));
 }
 
+TEST(private_data_path_tightens_open_file_and_directory)
+{
+    host_t *host = new_host();
+    CHECK(host != NULL);
+
+    char directory[PATH_MAX];
+    snprintf(directory, sizeof(directory), "%s/private", g_dir);
+    CHECK(mkdir(directory, 0700) == 0);
+    CHECK(chmod(directory, 0777) == 0);
+
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/state.dat", directory);
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    CHECK(fd >= 0);
+    CHECK(close(fd) == 0);
+    CHECK(chmod(path, 0666) == 0);
+
+    CHECK(host_ensure_private_data_path(host, path, false));
+
+    struct stat st;
+    CHECK(stat(directory, &st) == 0);
+    CHECK_EQ((int)(st.st_mode & (S_IWGRP | S_IWOTH)), 0);
+    CHECK(stat(path, &st) == 0);
+    CHECK_EQ((int)(st.st_mode & 0777), 0600);
+
+    unlink(path);
+    rmdir(directory);
+    free_host(host);
+}
+
+TEST(archive_append_creates_then_reopens_same_file)
+{
+    host_t *host = new_host();
+    CHECK(host != NULL);
+    snprintf(host->state_file_path, sizeof(host->state_file_path), "%s/state.dat",
+             g_dir);
+    atomic_store(&host->chat_archive_enabled, true);
+
+    chat_history_entry_t entry = {0};
+    entry.created_at = 0;
+    entry.is_user_message = true;
+    snprintf(entry.username, sizeof(entry.username), "%s", "alice");
+    snprintf(entry.message, sizeof(entry.message), "%s", "first");
+    CHECK(host_archive_append_entry(host, &entry));
+    snprintf(entry.message, sizeof(entry.message), "%s", "second");
+    CHECK(host_archive_append_entry(host, &entry));
+
+    char path[PATH_MAX];
+    CHECK(host_archive_resolve_path(host, entry.created_at, path, sizeof(path)));
+    FILE *fp = fopen(path, "rb");
+    CHECK(fp != NULL);
+    host_state_header_t header = {0};
+    CHECK(fread(&header, sizeof(header), 1U, fp) == 1U);
+    CHECK_EQ(header.base.history_count, 2U);
+    fclose(fp);
+
+    struct stat st;
+    CHECK(stat(path, &st) == 0);
+    CHECK_EQ((int)(st.st_mode & 0777), 0600);
+
+    unlink(path);
+    free_host(host);
+}
+
 int main(void)
 {
     snprintf(g_dir, sizeof(g_dir), "/tmp/sshc-persistence-test-%ld",
@@ -315,6 +379,8 @@ int main(void)
     RUN_TEST(bbs_threads_round_trip);
     RUN_TEST(bbs_threads_follow_shifted_comments);
     RUN_TEST(login_is_password_command_masking);
+    RUN_TEST(private_data_path_tightens_open_file_and_directory);
+    RUN_TEST(archive_append_creates_then_reopens_same_file);
 
     rmdir(g_dir);
     return TEST_REPORT();

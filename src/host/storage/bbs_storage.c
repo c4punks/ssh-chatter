@@ -266,7 +266,7 @@ static void host_bbs_backup_rotate_locked(host_t *host)
         fclose(source);
         return;
     }
-    chmod(backup_path, S_IRUSR | S_IWUSR);
+    (void)fchmod(fileno(target), S_IRUSR | S_IWUSR);
 
     char copy_buffer[8192];
     size_t chunk;
@@ -454,7 +454,9 @@ static void host_bbs_state_save_locked(host_t *host)
 
     if (success) {
         int file_descriptor = fileno(fp);
-        if (file_descriptor >= 0 && fsync(file_descriptor) != 0) {
+        if (file_descriptor < 0 ||
+            fchmod(file_descriptor, S_IRUSR | S_IWUSR) != 0 ||
+            fsync(file_descriptor) != 0) {
             success = false;
         }
     }
@@ -469,21 +471,10 @@ static void host_bbs_state_save_locked(host_t *host)
         return;
     }
 
-    if (chmod(temp_path, S_IRUSR | S_IWUSR) != 0) {
-        humanized_log_error("host",
-                            "failed to tighten temporary bbs state permissions",
-                            errno != 0 ? errno : EACCES);
-        unlink(temp_path);
-        return;
-    }
-
     if (rename(temp_path, host->bbs_state_file_path) != 0) {
         humanized_log_error("host", "failed to update bbs state file", errno);
         unlink(temp_path);
         return;
-    } else if (chmod(host->bbs_state_file_path, S_IRUSR | S_IWUSR) != 0) {
-        humanized_log_error("host", "failed to tighten bbs state permissions",
-                            errno != 0 ? errno : EACCES);
     }
 
     host_bbs_backup_rotate_locked(host);
@@ -611,11 +602,10 @@ static void host_bbs_boards_save_locked(host_t *host)
         fwrite(&entry, sizeof(entry), 1, fp);
     }
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 static void host_bbs_boards_load(host_t *host)
@@ -712,11 +702,10 @@ static void host_bbs_votes_save_locked(host_t *host)
         fwrite(&entry, sizeof(entry), 1, fp);
     }
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 static void host_bbs_votes_load(host_t *host)
@@ -806,11 +795,10 @@ static void host_bbs_drafts_save_locked(host_t *host)
         fwrite(&entry, sizeof(entry), 1, fp);
     }
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 static void host_bbs_drafts_load(host_t *host)
@@ -905,11 +893,10 @@ static void host_bbs_notifications_save_locked(host_t *host)
     }
 
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 static void host_bbs_notifications_load(host_t *host)
@@ -1034,11 +1021,10 @@ static void host_bbs_threads_save_locked(host_t *host)
     }
 
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 /* Index of the comment created at stamp, trying hint first; -1 if none. */
@@ -1159,11 +1145,10 @@ static void host_bbs_readmarks_save_locked(host_t *host)
     }
 
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 static void host_bbs_readmarks_load(host_t *host)
@@ -1252,11 +1237,10 @@ static void host_bbs_reports_save_locked(host_t *host)
     }
 
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 static void host_bbs_reports_load(host_t *host)
@@ -1363,11 +1347,10 @@ static void host_bbs_mutes_save_locked(host_t *host)
     }
 
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 static void host_bbs_mutes_load(host_t *host)
@@ -1469,11 +1452,10 @@ static void host_bbs_modlog_save_locked(host_t *host)
     }
 
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 static void host_bbs_modlog_load(host_t *host)
@@ -1637,11 +1619,10 @@ static void host_bbs_ipaudit_save_locked(host_t *host)
     }
 
     fflush(fp);
+    fchmod(fd, S_IRUSR | S_IWUSR);
     fsync(fd);
     fclose(fp);
-    chmod(temp_path, S_IRUSR | S_IWUSR);
     rename(temp_path, path);
-    chmod(path, S_IRUSR | S_IWUSR);
 }
 
 static void host_bbs_ipaudit_load(host_t *host)
@@ -2343,15 +2324,19 @@ void host_door_games_save_locked(host_t *host)
                 host->door_games[i].locked ? 1 : 0);
     }
 
+    if (fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
+        humanized_log_error("door",
+                            "failed to tighten door game state permissions",
+                            errno != 0 ? errno : EACCES);
+        fclose(fp);
+        unlink(temp_path);
+        return;
+    }
     fclose(fp);
     if (rename(temp_path, path) != 0) {
         humanized_log_error("door", "failed to update door game state file",
                             errno);
         unlink(temp_path);
-    } else if (chmod(path, S_IRUSR | S_IWUSR) != 0) {
-        humanized_log_error("door",
-                            "failed to tighten door game state permissions",
-                            errno != 0 ? errno : EACCES);
     }
 }
 

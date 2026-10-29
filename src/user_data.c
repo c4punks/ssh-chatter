@@ -251,17 +251,14 @@ static bool user_data_create_backup(const char *path)
         return false;
     }
 
-    if (access(path, F_OK) != 0) {
-        return true;
+    int src = open(path, O_RDONLY | O_CLOEXEC);
+    if (src < 0) {
+        return errno == ENOENT;
     }
 
     char backup_path[PATH_MAX];
     if (!user_data_backup_path(path, backup_path, sizeof(backup_path))) {
-        return false;
-    }
-
-    int src = open(path, O_RDONLY);
-    if (src < 0) {
+        close(src);
         return false;
     }
 

@@ -313,6 +313,32 @@ TEST(load_rejects_corrupt_file)
     CHECK(!user_data_load(g_root, "mallory", NULL, &loaded));
 }
 
+TEST(save_snapshots_previous_record_without_existence_precheck)
+{
+    fresh_root();
+    CHECK(user_data_ensure_root(g_root));
+
+    user_data_record_t record;
+    CHECK(user_data_init(&record, "backup", NULL));
+    record.flag_count = 1U;
+    CHECK(user_data_save(g_root, &record, NULL));
+    record.flag_count = 2U;
+    CHECK(user_data_save(g_root, &record, NULL));
+
+    char path[PATH_MAX];
+    CHECK(user_data_path_for(g_root, "backup", NULL, true, path,
+                             sizeof(path)));
+    char backup_path[PATH_MAX + 5];
+    snprintf(backup_path, sizeof(backup_path), "%s.bak", path);
+
+    FILE *fp = fopen(backup_path, "rb");
+    CHECK(fp != NULL);
+    user_data_record_t previous;
+    CHECK(fread(&previous, sizeof(previous), 1U, fp) == 1U);
+    CHECK_EQ(previous.flag_count, 1U);
+    fclose(fp);
+}
+
 int main(void)
 {
     snprintf(g_root, sizeof(g_root), "/tmp/sshc-user-data-test-%ld",
@@ -337,6 +363,7 @@ int main(void)
     RUN_TEST(ensure_exists_creates_then_reuses_record);
     RUN_TEST(path_for_stays_inside_root);
     RUN_TEST(load_rejects_corrupt_file);
+    RUN_TEST(save_snapshots_previous_record_without_existence_precheck);
 
     remove_tree(g_root);
     return TEST_REPORT();
