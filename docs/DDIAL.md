@@ -181,6 +181,25 @@ and name keeps its original id. Pending requests are stored in
 `ddial_station_requests.dat` next to the member files and rewritten
 atomically whenever they change.
 
+### Outbound request tracking
+
+Operators can submit the same request without putting `@request:` in the
+reconnecting relay configuration:
+
+- `/ddial request <host> <port> <station-name>` opens a separate one-shot
+  connection, waits for the password prompt, sends the request and closes.
+  It does not change the configured DDial relay or trigger its reconnect
+  loop.
+- `/ddial request-status` shows the tracked remote request id, station name
+  and hub address.
+- `/ddial request-cancel` clears the local tracking record. It does not
+  delete the request from the remote hub; that hub's operator must deny it.
+
+The last outbound request is stored in `ddial_outbound_request.dat` next to
+the member files and restored by reading that file. A new request requires
+cancelling the previous local tracking first. After approval, use the issued
+key with `/ddial connect` or `CHATTER_DDIAL_KEY` as usual.
+
 Keys are stored as PBKDF2-SHA256 hashes in `ddial_station_keys.tsv` next to
 the member files (mode 0600).
 

@@ -2359,6 +2359,45 @@ static const session_help_entry_t kSessionHelpOperator[] = {
     },
     {
         .kind = SESSION_HELP_ENTRY_COMMAND,
+        .label = "ddial <request <host> <port> <station-name>|request-status|request-cancel>",
+        .description =
+            {
+                "Submit a one-shot station request without changing the DDial "
+                "relay. request-status shows saved tracking; request-cancel "
+                "clears only local tracking, not the remote request (operator "
+                "only).",
+                "DDial 중계 설정을 바꾸지 않고 스테이션 요청을 한 번 별냅니다. "
+                "request-status는 저장된 추적 정보를 보여주고, request-cancel은 "
+                "원격 요청이 아닌 로컬 추적만 지웁니다 (운영자 전용).",
+                "DDial 中継を変更せずにステーション要求を一度だけ送信します。"
+                "request-status は保存した追跡情報を表示し、request-cancel は"
+                "リモート要求ではなくローカル追跡だけを消去します"
+                "（オペレーター専用）。",
+                "在不更改 DDial 中继的情况下发送一次性站点请求。"
+                "request-status 显示已保存的跟踪信息；request-cancel 仅清除"
+                "本地跟踪，不删除远程请求（仅限管理员）。",
+                "Отправить одноразовый запрос станции без изменения ретрансляции "
+                "DDial. request-status показывает сохранённое отслеживание; "
+                "request-cancel очищает только локальное отслеживание, не "
+                "удалённый запрос (только оператор).",
+                "Einmalige Stationsanfrage senden, ohne das DDial-Relay zu "
+                "ändern. request-status zeigt die gespeicherte Verfolgung; "
+                "request-cancel löscht nur die lokale Verfolgung, nicht die "
+                "entfernte Anfrage (nur Operatoren).",
+                "Envoyer une demande de station unique sans modifier le relais "
+                "DDial. request-status affiche le suivi enregistré ; "
+                "request-cancel efface uniquement le suivi local, pas la "
+                "demande distante (opérateur uniquement).",
+                "Wyślij jednorazowe zgłoszenie stacji bez zmiany przekaźnika "
+                "DDial. request-status pokazuje zapisane śledzenie; "
+                "request-cancel czyści tylko lokalne śledzenie, nie zdalne "
+                "zgłoszenie (tylko operator).",
+            },
+        .label_arg_count = 0U,
+        .label_args = {},
+    },
+    {
+        .kind = SESSION_HELP_ENTRY_COMMAND,
         .label = "resetpw <nickname>",
         .description =
             {

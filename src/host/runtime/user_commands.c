@@ -1070,7 +1070,7 @@ static void session_handle_ddial(session_ctx_t *ctx, const char *arguments)
                  relay->port);
         session_send_system_line(ctx, status);
         session_send_system_line(
-            ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status|key|hub|requests|approve <request-id>|deny <request-id>>");
+            ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status|key|hub|requests|approve <request-id>|deny <request-id>|request <host> <port> <station-name>|request-status|request-cancel>");
         return;
     }
 
@@ -1088,15 +1088,121 @@ static void session_handle_ddial(session_ctx_t *ctx, const char *arguments)
         return;
     }
 
-    /* Station hub: requests and keys for inbound station links. */
+    /* Station hub: outbound requests, inbound requests and link keys. */
     if (strcasecmp(action, "key") == 0 || strcasecmp(action, "hub") == 0 ||
         strcasecmp(action, "requests") == 0 ||
         strcasecmp(action, "approve") == 0 ||
-        strcasecmp(action, "deny") == 0) {
+        strcasecmp(action, "deny") == 0 ||
+        strcasecmp(action, "request") == 0 ||
+        strcasecmp(action, "request-status") == 0 ||
+        strcasecmp(action, "request-cancel") == 0) {
         if (!ctx->user.is_operator) {
             session_send_system_line(
                 ctx, session_command_localize(
                          ctx, "Only operators can manage DDial station links."));
+            return;
+        }
+        if (strcasecmp(action, "request-status") == 0) {
+            char listing[SSH_CHATTER_MESSAGE_LIMIT];
+            ddial_outbound_request_result_t result =
+                host_ddial_outbound_request_status(ctx->owner, listing,
+                                                   sizeof(listing));
+            if (result == DDIAL_OUTBOUND_REQUEST_NOT_FOUND) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "No outbound station request is being tracked."));
+            } else if (result != DDIAL_OUTBOUND_REQUEST_OK) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "Could not read outbound station request tracking."));
+            } else {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "Tracked outbound station request:"));
+                session_send_system_line(ctx, listing);
+            }
+            return;
+        }
+        if (strcasecmp(action, "request-cancel") == 0) {
+            ddial_outbound_request_result_t result =
+                host_ddial_outbound_request_cancel(ctx->owner);
+            if (result == DDIAL_OUTBOUND_REQUEST_NOT_FOUND) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "No outbound station request is being tracked."));
+            } else if (result != DDIAL_OUTBOUND_REQUEST_OK) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "Could not save outbound station request tracking."));
+            } else {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "Outbound request tracking cleared; the remote hub request is unchanged."));
+            }
+            return;
+        }
+        if (strcasecmp(action, "request") == 0) {
+            static const char *kUsage =
+                "Usage: /ddial request <host> <port> <station-name>";
+            char remote_host[256];
+            char port_text[16];
+            const char *name = session_consume_token(rest, remote_host,
+                                                     sizeof(remote_host));
+            name = session_consume_token(name, port_text, sizeof(port_text));
+            char *end = nullptr;
+            unsigned long port = strtoul(port_text, &end, 10);
+            while (name != nullptr && (*name == ' ' || *name == '\t')) {
+                ++name;
+            }
+            if (remote_host[0] == '\0' || port_text[0] == '\0' ||
+                end == nullptr || *end != '\0' || port == 0UL ||
+                port > 65535UL || name == nullptr || name[0] == '\0') {
+                session_send_system_line(
+                    ctx, session_command_localize(ctx, kUsage));
+                return;
+            }
+
+            unsigned remote_id = 0U;
+            ddial_outbound_request_result_t result =
+                host_ddial_outbound_request_submit(ctx->owner, remote_host,
+                                                   (int)port, name,
+                                                   &remote_id);
+            if (result == DDIAL_OUTBOUND_REQUEST_OK ||
+                (result == DDIAL_OUTBOUND_REQUEST_STORAGE_ERROR &&
+                 remote_id > 0U)) {
+                char line[SSH_CHATTER_MESSAGE_LIMIT];
+                if (result == DDIAL_OUTBOUND_REQUEST_OK) {
+                    session_command_snprintf(
+                        ctx, line, sizeof(line),
+                        "Station request #%u recorded at %s:%lu for '%s'.",
+                        remote_id, remote_host, port, name);
+                } else {
+                    session_command_snprintf(
+                        ctx, line, sizeof(line),
+                        "Remote station request #%u was recorded, but local tracking could not be saved.",
+                        remote_id);
+                }
+                session_send_system_line(ctx, line);
+            } else if (result == DDIAL_OUTBOUND_REQUEST_PENDING_EXISTS) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "An outbound station request is already tracked; check request-status or cancel it first."));
+            } else if (result == DDIAL_OUTBOUND_REQUEST_BUSY) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "Another outbound station request is already in progress."));
+            } else if (result == DDIAL_OUTBOUND_REQUEST_INVALID) {
+                session_send_system_line(
+                    ctx, session_command_localize(ctx, kUsage));
+            } else if (result == DDIAL_OUTBOUND_REQUEST_STORAGE_ERROR) {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "Could not read or save outbound station request tracking."));
+            } else {
+                session_send_system_line(
+                    ctx, session_command_localize(
+                             ctx, "Could not register the request with the remote station hub."));
+            }
             return;
         }
         if (strcasecmp(action, "hub") == 0) {
@@ -1400,7 +1506,7 @@ static void session_handle_ddial(session_ctx_t *ctx, const char *arguments)
 
     session_send_system_line(ctx, "Unknown /ddial subcommand.");
     session_send_system_line(
-        ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status|key|hub|requests|approve <request-id>|deny <request-id>>");
+        ctx, "Usage: /ddial <connect <host> <port> [handle] [password]|raw <c-string>|reconnect|disconnect|status|key|hub|requests|approve <request-id>|deny <request-id>|request <host> <port> <station-name>|request-status|request-cancel>");
 }
 
 void session_handle_ddial_slash(session_ctx_t *ctx, const char *line)

@@ -709,6 +709,114 @@ static bool history_contains(const char *text, uint64_t *id_out)
     return found;
 }
 
+TEST(outbound_request_client_tracks_cancels_and_resubmits)
+{
+    int port = free_port();
+    char spec[32];
+    snprintf(spec, sizeof(spec), "127.0.0.1:%d", port);
+    setenv("CHATTER_DDIAL_HUB_LISTEN", spec, 1);
+    setenv("CHATTER_DDIAL_STATION", "RequestTestHub", 1);
+    host_ddial_hub_start(g_host);
+    int ready = connect_loopback(port);
+    CHECK(ready >= 0);
+    close(ready);
+
+    char relay_host[sizeof(g_host->ddial_relay.host)];
+    snprintf(relay_host, sizeof(relay_host), "%s", g_host->ddial_relay.host);
+    int relay_port = g_host->ddial_relay.port;
+    bool relay_enabled = g_host->ddial_relay.enabled;
+
+    char output[16384];
+    CHECK(command_output("/ddial request-status", output, sizeof(output)));
+    CHECK(strstr(output, "Only operators can manage DDial station links.") !=
+          NULL);
+    CHECK(command_output_as("/ddial request-status", true, output,
+                            sizeof(output)));
+    CHECK(strstr(output, "No outbound station request is being tracked.") !=
+          NULL);
+    CHECK(command_output_as("/ddial request 127.0.0.1 nope Bad", true, output,
+                            sizeof(output)));
+    CHECK(strstr(output,
+                 "Usage: /ddial request <host> <port> <station-name>") != NULL);
+
+    char command[512];
+    snprintf(command, sizeof(command),
+             "/ddial request 127.0.0.1 %d Outbound One", port);
+    CHECK(command_output_as(command, true, output, sizeof(output)));
+    char *recorded = strstr(output, "Station request #");
+    CHECK(recorded != NULL);
+    unsigned remote_id = 0U;
+    CHECK_EQ(sscanf(recorded, "Station request #%u", &remote_id), 1);
+    CHECK(remote_id > 0U);
+    CHECK(strstr(output, "for 'Outbound One'.") != NULL);
+
+    char request_listing[4096];
+    CHECK_EQ(host_ddial_hub_request_list(g_host, request_listing,
+                                         sizeof(request_listing)),
+             1U);
+    CHECK(strstr(request_listing, "Outbound One [127.0.0.1]") != NULL);
+
+    CHECK(command_output_as("/ddial request-status", true, output,
+                            sizeof(output)));
+    char expected[512];
+    snprintf(expected, sizeof(expected), "#%u Outbound One (127.0.0.1:%d)",
+             remote_id, port);
+    CHECK(strstr(output, expected) != NULL);
+
+    host_t *restarted = new_host();
+    CHECK(restarted != NULL);
+    char tracking[1024];
+    CHECK_EQ(host_ddial_outbound_request_status(restarted, tracking,
+                                                sizeof(tracking)),
+             DDIAL_OUTBOUND_REQUEST_OK);
+    CHECK_STR_EQ(tracking, expected);
+    free(restarted);
+
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/ddial_outbound_request.dat", g_dir);
+    struct stat st;
+    CHECK_EQ(stat(path, &st), 0);
+    CHECK_EQ(st.st_mode & 0777, 0600);
+    FILE *fp = fopen(path, "r");
+    CHECK(fp != NULL);
+    char contents[2048] = {0};
+    size_t n = fread(contents, 1U, sizeof(contents) - 1U, fp);
+    fclose(fp);
+    contents[n] = '\0';
+    CHECK(strstr(contents, "127.0.0.1") != NULL);
+    CHECK(strstr(contents, "Outbound One") != NULL);
+
+    CHECK(command_output_as(command, true, output, sizeof(output)));
+    CHECK(strstr(output, "An outbound station request is already tracked") !=
+          NULL);
+    CHECK_STR_EQ(g_host->ddial_relay.host, relay_host);
+    CHECK_EQ(g_host->ddial_relay.port, relay_port);
+    CHECK_EQ(g_host->ddial_relay.enabled, relay_enabled);
+
+    CHECK(command_output_as("/ddial request-cancel", true, output,
+                            sizeof(output)));
+    CHECK(strstr(output, "Outbound request tracking cleared") != NULL);
+    CHECK(command_output_as("/ddial request-status", true, output,
+                            sizeof(output)));
+    CHECK(strstr(output, "No outbound station request is being tracked.") !=
+          NULL);
+    CHECK_EQ(host_ddial_hub_request_list(g_host, request_listing,
+                                         sizeof(request_listing)),
+             1U);
+
+    CHECK(command_output_as(command, true, output, sizeof(output)));
+    recorded = strstr(output, "Station request #");
+    CHECK(recorded != NULL);
+    unsigned resubmitted_id = 0U;
+    CHECK_EQ(sscanf(recorded, "Station request #%u", &resubmitted_id), 1);
+    CHECK_EQ(resubmitted_id, remote_id);
+    CHECK(command_output_as("/ddial request-cancel", true, output,
+                            sizeof(output)));
+    CHECK_EQ(host_ddial_hub_request_deny(g_host, remote_id),
+             DDIAL_HUB_REQUEST_OK);
+    host_ddial_hub_stop(g_host);
+}
+
 TEST(station_links_with_key_and_relays_chat)
 {
     int port = free_port();
@@ -973,6 +1081,10 @@ static void remove_dir_files(const char *dir)
     unlink(path);
     snprintf(path, sizeof(path), "%s/ddial_station_requests.dat.tmp", dir);
     unlink(path);
+    snprintf(path, sizeof(path), "%s/ddial_outbound_request.dat", dir);
+    unlink(path);
+    snprintf(path, sizeof(path), "%s/ddial_outbound_request.dat.tmp", dir);
+    unlink(path);
     rmdir(dir);
 }
 
@@ -1001,6 +1113,7 @@ int main(void)
     RUN_TEST(station_key_create_match_revoke);
     RUN_TEST(station_request_workflow_persists_and_manages_requests);
     RUN_TEST(failed_logins_block_an_address);
+    RUN_TEST(outbound_request_client_tracks_cancels_and_resubmits);
     RUN_TEST(station_links_with_key_and_relays_chat);
     RUN_TEST(scrollback_entry_visibility_check);
     RUN_TEST(scrollback_skips_consecutive_noise_entries);

@@ -18,6 +18,7 @@
 #include "ddial/display.c"
 #include "ddial/magviz.c"
 #include "ddial/client.c"
+#include "ddial/request.c"
 #include "ddial/inject.c"
 #include "ddial/integration.c"
 #include "ddial/mailbridge.c"
