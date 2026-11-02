@@ -15,6 +15,7 @@
 #include "ssh_chatter/security_layer.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/file.h>
@@ -1080,58 +1081,19 @@ static void user_data_remove_ip_variants(const char *root,
     }
 }
 
-bool user_data_save(const char *restrict root,
-                    const user_data_record_t *restrict record,
-                    const char *restrict ip)
+static bool user_data_write_record(const char *path,
+                                   const user_data_record_t *normalized)
 {
-    if (record == nullptr) {
-        return false;
-    }
-
-    char path[PATH_MAX];
-    const char *effective_ip =
-        (ip != nullptr && ip[0] != '\0') ? ip : record->last_ip;
-    const bool ip_wide = user_data_reserved_nickname_is_ip_wide(record);
-    if (user_data_has_password(record) || ip_wide) {
-        if (!user_data_username_only_path(root, record->username, path,
-                                          sizeof(path))) {
-            return false;
-        }
-    } else if (!user_data_path_for(root, record->username, effective_ip, true,
-                                   path, sizeof(path))) {
-        return false;
-    }
-
-    if (!user_data_ensure_root(root)) {
-        return false;
-    }
-
-    if (!user_data_ensure_parent(path)) {
-        return false;
-    }
-
     char temp_path[PATH_MAX];
     int written = snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
     if (written < 0 || (size_t)written >= sizeof(temp_path)) {
         return false;
     }
 
-    /* Remove stale temp file from a previous interrupted write. */
     unlink(temp_path);
 
-    user_data_record_t normalized;
-    memcpy(&normalized, record, sizeof(normalized));
-    user_data_normalize_record(&normalized, record->username);
-    normalized.magic = USER_DATA_MAGIC;
-    normalized.version = USER_DATA_VERSION;
-    if (effective_ip != nullptr && effective_ip[0] != '\0') {
-        snprintf(normalized.last_ip, sizeof(normalized.last_ip), "%s",
-                 effective_ip);
-    }
-
     user_data_record_t disk_record;
-    memcpy(&disk_record, &normalized, sizeof(disk_record));
-    /* Profile pictures are persisted in dedicated per-user .dat files. */
+    memcpy(&disk_record, normalized, sizeof(disk_record));
     memset(disk_record.profile_picture, 0, sizeof(disk_record.profile_picture));
 
     int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC, 0640);
@@ -1139,14 +1101,12 @@ bool user_data_save(const char *restrict root,
         return false;
     }
 
-    /* Serialize writes to the same user record across processes. */
     if (flock(fd, LOCK_EX) != 0) {
         close(fd);
         unlink(temp_path);
         return false;
     }
 
-    /* Snapshot the previous record so we can roll back on failure. */
     (void)user_data_create_backup(path);
 
     bool success = true;
@@ -1169,7 +1129,6 @@ bool user_data_save(const char *restrict root,
         error = errno;
     }
 
-    /* Lock is released when fd is closed. */
     if (close(fd) != 0 && success) {
         success = false;
         error = errno;
@@ -1188,8 +1147,49 @@ bool user_data_save(const char *restrict root,
         return false;
     }
 
-    /* Ensure the rename is durable. */
     (void)user_data_fsync_parent_dir(path);
+    return true;
+}
+
+bool user_data_save(const char *restrict root,
+                    const user_data_record_t *restrict record,
+                    const char *restrict ip)
+{
+    if (record == nullptr) {
+        return false;
+    }
+
+    char path[PATH_MAX];
+    const char *effective_ip =
+        (ip != nullptr && ip[0] != '\0') ? ip : record->last_ip;
+    const bool ip_wide = user_data_reserved_nickname_is_ip_wide(record);
+    if (user_data_has_password(record) || ip_wide) {
+        if (!user_data_username_only_path(root, record->username, path,
+                                          sizeof(path))) {
+            return false;
+        }
+    } else if (!user_data_path_for(root, record->username, effective_ip, true,
+                                   path, sizeof(path))) {
+        return false;
+    }
+
+    if (!user_data_ensure_root(root) || !user_data_ensure_parent(path)) {
+        return false;
+    }
+
+    user_data_record_t normalized;
+    memcpy(&normalized, record, sizeof(normalized));
+    user_data_normalize_record(&normalized, record->username);
+    normalized.magic = USER_DATA_MAGIC;
+    normalized.version = USER_DATA_VERSION;
+    if (effective_ip != nullptr && effective_ip[0] != '\0') {
+        snprintf(normalized.last_ip, sizeof(normalized.last_ip), "%s",
+                 effective_ip);
+    }
+
+    if (!user_data_write_record(path, &normalized)) {
+        return false;
+    }
 
     if (!user_data_profile_picture_store(root, &normalized)) {
         return false;
@@ -1200,6 +1200,74 @@ bool user_data_save(const char *restrict root,
     }
 
     return true;
+}
+
+bool user_data_upgrade_all(const char *restrict root,
+                           user_data_upgrade_result_t *restrict result)
+{
+    if (root == nullptr || root[0] == '\0' || result == nullptr) {
+        return false;
+    }
+    memset(result, 0, sizeof(*result));
+
+    DIR *directory = opendir(root);
+    if (directory == nullptr) {
+        return false;
+    }
+
+    bool success = true;
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(directory);
+        if (entry == nullptr) {
+            if (errno != 0) {
+                success = false;
+            }
+            break;
+        }
+
+        const size_t name_length = strlen(entry->d_name);
+        if (name_length < 5U ||
+            strcmp(entry->d_name + name_length - 4U, ".dat") != 0) {
+            continue;
+        }
+
+        char path[PATH_MAX];
+        int written = snprintf(path, sizeof(path), "%s/%s", root, entry->d_name);
+        if (written < 0 || (size_t)written >= sizeof(path)) {
+            result->failed++;
+            continue;
+        }
+
+        user_data_record_t record;
+        bool needs_upgrade = false;
+        if (!user_data_load_raw(path, &record, &needs_upgrade)) {
+            continue;
+        }
+        if (!needs_upgrade) {
+            result->current++;
+            continue;
+        }
+
+        record.username[SSH_CHATTER_USERNAME_LEN - 1U] = '\0';
+        char username[SSH_CHATTER_USERNAME_LEN];
+        snprintf(username, sizeof(username), "%s", record.username);
+        user_data_profile_picture_overlay(root, username, &record);
+        user_data_normalize_record(&record, username);
+        record.magic = USER_DATA_MAGIC;
+        record.version = USER_DATA_VERSION;
+        if (user_data_profile_picture_store(root, &record) &&
+            user_data_write_record(path, &record)) {
+            result->upgraded++;
+        } else {
+            result->failed++;
+        }
+    }
+
+    if (closedir(directory) != 0) {
+        success = false;
+    }
+    return success && result->failed == 0U;
 }
 
 bool user_data_ensure_exists(const char *restrict root,

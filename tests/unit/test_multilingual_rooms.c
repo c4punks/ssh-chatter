@@ -367,6 +367,51 @@ TEST(detailed_help_is_localized_and_searchable)
     free_host(host);
 }
 
+TEST(update_command_migrates_records_and_requests_restart)
+{
+    host_t *host = new_host();
+    CHECK(host != NULL);
+    host->user_data_ready = user_data_ensure_root(host->user_data_root);
+    CHECK(host->user_data_ready);
+    volatile sig_atomic_t shutdown_flag = 0;
+    host->shutdown_flag = &shutdown_flag;
+
+    user_data_record_t legacy;
+    CHECK(user_data_init(&legacy, "legacy", NULL));
+    legacy.version = 7U;
+    char path[PATH_MAX];
+    CHECK(user_data_path_for(host->user_data_root, "legacy", NULL, true, path,
+                             sizeof(path)));
+    FILE *fp = fopen(path, "wb");
+    CHECK(fp != NULL);
+    CHECK_EQ(fwrite(&legacy, offsetof(user_data_record_t, room_read_message_ids),
+                    1U, fp),
+             1U);
+    fclose(fp);
+
+    session_ctx_t ctx = new_session(host);
+    char output[32768];
+    CHECK(command_output(&ctx, "/update", output, sizeof(output)));
+    CHECK(strstr(output, "Only operators may update server records.") != NULL);
+    CHECK_EQ(shutdown_flag, 0);
+
+    ctx.user.is_operator = true;
+    ctx.ui_language = SESSION_UI_LANGUAGE_KO;
+    CHECK(command_output(&ctx, "/help 업데이트", output, sizeof(output)));
+    CHECK(strstr(output, "사용법: /업데이트") != NULL);
+    CHECK(strstr(output, "모든 구식 사용자 레코드를") != NULL);
+    CHECK(command_output(&ctx, "/업데이트", output, sizeof(output)));
+    CHECK(strstr(output, "레코드 업데이트 완료: 변환 1개") != NULL);
+    CHECK(strstr(output, "지금 서버를 재시작합니다.") != NULL);
+    CHECK_EQ(shutdown_flag, 1);
+    CHECK(host->force_restart_requested);
+
+    user_data_record_t loaded;
+    CHECK(user_data_load(host->user_data_root, "legacy", NULL, &loaded));
+    CHECK_EQ(loaded.version, 8U);
+    free_host(host);
+}
+
 static void remove_tree(const char *directory)
 {
     DIR *handle = opendir(directory);
@@ -404,6 +449,7 @@ int main(void)
     RUN_TEST(unread_paging_only_advances_past_displayed_messages);
     RUN_TEST(unread_mentions_include_replies_and_private_messages);
     RUN_TEST(detailed_help_is_localized_and_searchable);
+    RUN_TEST(update_command_migrates_records_and_requests_restart);
     remove_tree(g_dir);
     return TEST_REPORT();
 }

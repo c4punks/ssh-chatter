@@ -698,8 +698,8 @@ int main(int argc, char **argv)
         host = nullptr;
 
         if (force_restart_requested) {
-            printf("[daemon] memory pressure cleanup complete; restarting "
-                   "listeners without exiting the process\n");
+            printf("[daemon] restart requested; restarting listeners without "
+                   "exiting the process\n");
             daemon_extreme_gc_collect();
             g_shutdown_flag = 0;
             restart_attempts = 0U;

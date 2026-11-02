@@ -2247,6 +2247,31 @@ static const session_help_entry_t kSessionHelpExtended[] = {
 static const session_help_entry_t kSessionHelpOperator[] = {
     {
         .kind = SESSION_HELP_ENTRY_COMMAND,
+        .label = "update",
+        .description =
+            {
+                "Upgrade all legacy user records to the current format, then restart the server (operators only).",
+                "모든 구식 사용자 레코드를 현재 형식으로 변환한 뒤 서버를 재시작합니다 (운영자 전용).",
+                "すべての旧形式ユーザーレコードを現在の形式へ変換してからサーバーを再起動します（オペレーター専用）。",
+                "将所有旧版用户记录升级为当前格式，然后重启服务器（仅限管理员）。",
+                "Обновить все устаревшие записи пользователей до текущего формата и перезапустить сервер (только для операторов).",
+                "Alle veralteten Benutzerdatensätze in das aktuelle Format umwandeln und den Server neu starten (nur Operatoren).",
+                "Convertir tous les anciens enregistrements utilisateur au format actuel, puis redémarrer le serveur (opérateurs uniquement).",
+                "Uaktualnij wszystkie stare rekordy użytkowników do bieżącego formatu, a następnie uruchom ponownie serwer (tylko operatorzy).",
+            },
+        .label_translations =
+            {
+                [SESSION_UI_LANGUAGE_KO] = "업데이트",
+                [SESSION_UI_LANGUAGE_JP] = "更新",
+                [SESSION_UI_LANGUAGE_ZH] = "更新",
+                [SESSION_UI_LANGUAGE_RU] = "обновить",
+                [SESSION_UI_LANGUAGE_DE] = "aktualisieren",
+                [SESSION_UI_LANGUAGE_FR] = "mettreajour",
+                [SESSION_UI_LANGUAGE_PL] = "aktualizuj",
+            },
+    },
+    {
+        .kind = SESSION_HELP_ENTRY_COMMAND,
         .label = "translate-scope <chat|chat-nohistory|all>",
         .description =
             {

@@ -153,6 +153,12 @@ typedef struct user_data_cache_entry {
     time_t loaded_at;
 } user_data_cache_entry_t;
 
+typedef struct user_data_upgrade_result {
+    size_t upgraded;
+    size_t current;
+    size_t failed;
+} user_data_upgrade_result_t;
+
 /* ---- Names and paths ---- */
 
 /**
@@ -191,6 +197,9 @@ bool user_data_load(const char *restrict root, const char *restrict username,
 bool user_data_save(const char *restrict root,
                     const user_data_record_t *restrict record,
                     const char *restrict ip);
+/* Upgrade every recognized record in root without changing its file name. */
+bool user_data_upgrade_all(const char *restrict root,
+                           user_data_upgrade_result_t *restrict result);
 /* Load the record, creating and saving a default one if absent. */
 bool user_data_ensure_exists(const char *restrict root,
                              const char *restrict username,

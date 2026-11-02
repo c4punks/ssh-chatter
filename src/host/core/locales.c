@@ -644,6 +644,19 @@ static const char *const kSessionBbsTerminators[SESSION_UI_LANGUAGE_COUNT] = {
 
 static const session_command_alias_t kSessionCommandAliases[] = {
     {
+        .canonical = "/update",
+        .localized =
+            {
+                [SESSION_UI_LANGUAGE_KO] = "/업데이트",
+                [SESSION_UI_LANGUAGE_JP] = "/更新",
+                [SESSION_UI_LANGUAGE_ZH] = "/更新",
+                [SESSION_UI_LANGUAGE_RU] = "/обновить",
+                [SESSION_UI_LANGUAGE_DE] = "/aktualisieren",
+                [SESSION_UI_LANGUAGE_FR] = "/mettreajour",
+                [SESSION_UI_LANGUAGE_PL] = "/aktualizuj",
+            },
+    },
+    {
         .canonical = "/reply",
         .localized =
             {

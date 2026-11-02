@@ -2259,6 +2259,66 @@ static const session_command_message_t kSessionCommandMessages[] = {
             [SESSION_UI_LANGUAGE_PL] = "Użycie: /help [polecenie]",
         },
     },
+    {
+        "Only operators may update server records.",
+        {
+            [SESSION_UI_LANGUAGE_KO] = "운영자만 서버 레코드를 업데이트할 수 있습니다.",
+            [SESSION_UI_LANGUAGE_JP] = "サーバーレコードを更新できるのはオペレーターのみです。",
+            [SESSION_UI_LANGUAGE_ZH] = "只有管理员可以更新服务器记录。",
+            [SESSION_UI_LANGUAGE_RU] = "Только операторы могут обновлять записи сервера.",
+            [SESSION_UI_LANGUAGE_DE] = "Nur Operatoren dürfen Serverdatensätze aktualisieren.",
+            [SESSION_UI_LANGUAGE_FR] = "Seuls les opérateurs peuvent mettre à jour les enregistrements du serveur.",
+            [SESSION_UI_LANGUAGE_PL] = "Tylko operatorzy mogą aktualizować rekordy serwera.",
+        },
+    },
+    {
+        "Usage: /update",
+        {
+            [SESSION_UI_LANGUAGE_KO] = "사용법: /update",
+            [SESSION_UI_LANGUAGE_JP] = "使い方: /update",
+            [SESSION_UI_LANGUAGE_ZH] = "用法：/update",
+            [SESSION_UI_LANGUAGE_RU] = "Использование: /update",
+            [SESSION_UI_LANGUAGE_DE] = "Verwendung: /update",
+            [SESSION_UI_LANGUAGE_FR] = "Utilisation : /update",
+            [SESSION_UI_LANGUAGE_PL] = "Użycie: /update",
+        },
+    },
+    {
+        "Record update is unavailable on this server.",
+        {
+            [SESSION_UI_LANGUAGE_KO] = "이 서버에서는 레코드 업데이트를 사용할 수 없습니다.",
+            [SESSION_UI_LANGUAGE_JP] = "このサーバーではレコード更新を利用できません。",
+            [SESSION_UI_LANGUAGE_ZH] = "此服务器无法执行记录更新。",
+            [SESSION_UI_LANGUAGE_RU] = "Обновление записей на этом сервере недоступно.",
+            [SESSION_UI_LANGUAGE_DE] = "Die Datensatzaktualisierung ist auf diesem Server nicht verfügbar.",
+            [SESSION_UI_LANGUAGE_FR] = "La mise à jour des enregistrements n'est pas disponible sur ce serveur.",
+            [SESSION_UI_LANGUAGE_PL] = "Aktualizacja rekordów jest niedostępna na tym serwerze.",
+        },
+    },
+    {
+        "Record update incomplete: %zu upgraded, %zu current, %zu failed. Server restart cancelled.",
+        {
+            [SESSION_UI_LANGUAGE_KO] = "레코드 업데이트 미완료: 변환 %zu개, 최신 %zu개, 실패 %zu개. 서버 재시작을 취소했습니다.",
+            [SESSION_UI_LANGUAGE_JP] = "レコード更新が未完了です: 変換 %zu 件、最新 %zu 件、失敗 %zu 件。サーバー再起動を中止しました。",
+            [SESSION_UI_LANGUAGE_ZH] = "记录更新未完成：已转换 %zu 条，已是最新 %zu 条，失败 %zu 条。已取消服务器重启。",
+            [SESSION_UI_LANGUAGE_RU] = "Обновление записей не завершено: обновлено %zu, актуальных %zu, ошибок %zu. Перезапуск сервера отменён.",
+            [SESSION_UI_LANGUAGE_DE] = "Datensatzaktualisierung unvollständig: %zu aktualisiert, %zu aktuell, %zu fehlgeschlagen. Serverneustart abgebrochen.",
+            [SESSION_UI_LANGUAGE_FR] = "Mise à jour incomplète : %zu convertis, %zu à jour, %zu échecs. Redémarrage du serveur annulé.",
+            [SESSION_UI_LANGUAGE_PL] = "Aktualizacja rekordów niekompletna: zaktualizowano %zu, aktualnych %zu, błędów %zu. Anulowano ponowne uruchomienie serwera.",
+        },
+    },
+    {
+        "Record update complete: %zu upgraded, %zu already current. Restarting server now.",
+        {
+            [SESSION_UI_LANGUAGE_KO] = "레코드 업데이트 완료: 변환 %zu개, 기존 최신 %zu개. 지금 서버를 재시작합니다.",
+            [SESSION_UI_LANGUAGE_JP] = "レコード更新完了: 変換 %zu 件、既に最新 %zu 件。サーバーを今すぐ再起動します。",
+            [SESSION_UI_LANGUAGE_ZH] = "记录更新完成：已转换 %zu 条，已是最新 %zu 条。现在重启服务器。",
+            [SESSION_UI_LANGUAGE_RU] = "Обновление записей завершено: обновлено %zu, уже актуальных %zu. Сервер перезапускается.",
+            [SESSION_UI_LANGUAGE_DE] = "Datensatzaktualisierung abgeschlossen: %zu aktualisiert, %zu bereits aktuell. Der Server wird jetzt neu gestartet.",
+            [SESSION_UI_LANGUAGE_FR] = "Mise à jour terminée : %zu convertis, %zu déjà à jour. Le serveur redémarre maintenant.",
+            [SESSION_UI_LANGUAGE_PL] = "Aktualizacja rekordów zakończona: zaktualizowano %zu, już aktualnych %zu. Serwer zostanie teraz uruchomiony ponownie.",
+        },
+    },
 };
 
 // Returns the message in the session's UI language, or the English text when

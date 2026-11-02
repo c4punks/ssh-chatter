@@ -369,6 +369,59 @@ TEST(version_seven_records_keep_reserved_flags_when_upgraded)
     CHECK_EQ(loaded.unread_pm_count, 0U);
 }
 
+TEST(upgrade_all_migrates_legacy_records_in_place)
+{
+    fresh_root();
+    CHECK(user_data_ensure_root(g_root));
+
+    user_data_record_t legacy;
+    CHECK(user_data_init(&legacy, "legacy", NULL));
+    legacy.version = 7U;
+    user_data_set_fixnick_enabled(&legacy, true);
+    snprintf(legacy.profile_picture, sizeof(legacy.profile_picture), "%s",
+             "legacy profile art");
+    char legacy_path[PATH_MAX];
+    CHECK(user_data_path_for(g_root, "legacy", NULL, true, legacy_path,
+                             sizeof(legacy_path)));
+    FILE *fp = fopen(legacy_path, "wb");
+    CHECK(fp != NULL);
+    const size_t legacy_size = offsetof(user_data_record_t, room_read_message_ids);
+    CHECK_EQ(fwrite(&legacy, legacy_size, 1U, fp), 1U);
+    fclose(fp);
+
+    user_data_record_t current;
+    CHECK(user_data_init(&current, "current", NULL));
+    CHECK(user_data_save(g_root, &current, NULL));
+
+    char unrelated_path[PATH_MAX];
+    snprintf(unrelated_path, sizeof(unrelated_path), "%s/state.dat", g_root);
+    fp = fopen(unrelated_path, "wb");
+    CHECK(fp != NULL);
+    fputs("not a user record", fp);
+    fclose(fp);
+
+    user_data_upgrade_result_t result;
+    CHECK(user_data_upgrade_all(g_root, &result));
+    CHECK_EQ(result.upgraded, 1U);
+    CHECK_EQ(result.current, 1U);
+    CHECK_EQ(result.failed, 0U);
+
+    struct stat st;
+    CHECK_EQ(stat(legacy_path, &st), 0);
+    CHECK_EQ((size_t)st.st_size, sizeof(user_data_record_t));
+    user_data_record_t loaded;
+    CHECK(user_data_load(g_root, "legacy", NULL, &loaded));
+    CHECK_EQ(loaded.version, 8U);
+    CHECK(user_data_fixnick_enabled(&loaded));
+    CHECK_EQ(loaded.unread_pm_count, 0U);
+    CHECK_STR_EQ(loaded.profile_picture, "legacy profile art");
+
+    CHECK(user_data_upgrade_all(g_root, &result));
+    CHECK_EQ(result.upgraded, 0U);
+    CHECK_EQ(result.current, 2U);
+    CHECK_EQ(result.failed, 0U);
+}
+
 int main(void)
 {
     snprintf(g_root, sizeof(g_root), "/tmp/sshc-user-data-test-%ld",
@@ -391,6 +444,7 @@ int main(void)
     RUN_TEST(save_then_load_round_trips_fields);
     RUN_TEST(read_cursors_and_unread_private_messages_round_trip);
     RUN_TEST(version_seven_records_keep_reserved_flags_when_upgraded);
+    RUN_TEST(upgrade_all_migrates_legacy_records_in_place);
     RUN_TEST(load_missing_user_fails);
     RUN_TEST(ensure_exists_creates_then_reuses_record);
     RUN_TEST(path_for_stays_inside_root);

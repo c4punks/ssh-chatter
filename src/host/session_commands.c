@@ -11,6 +11,7 @@
 #include "commands/poll.c"
 #include "commands/settings.c"
 #include "commands/unread.c"
+#include "commands/update.c"
 #include "commands/rooms.c"
 #include "commands/wall.c"
 #include "commands/bbs.c"

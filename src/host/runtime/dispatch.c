@@ -109,6 +109,11 @@ static void session_dispatch_command(session_ctx_t *ctx, const char *line)
         return;
     }
 
+    else if (session_parse_command_any(ctx, "/update", effective_line, &args)) {
+        session_handle_update(ctx, args);
+        return;
+    }
+
     else if (session_parse_command_any(ctx, "/kick", effective_line, &args)) {
         session_handle_kick(ctx, args);
         return;

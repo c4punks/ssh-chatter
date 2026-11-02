@@ -26,6 +26,7 @@ SSH-Chatter has started from a C reimplementation of the Go [`ssh-chat`](https:/
 - Chat UI refresh with a clean divider between history and input, instant input clearing after send, and a friendly "Wait for a moment..." banner
 - Optional encoding-based chat rooms with `/multilingual-route on|off`: non-ASCII UTF-8 messages route to `UTF-8`, while legacy non-CP437 input routes to its codepage room (for example `CP949`). Rooms are created on first use and persist in history; `/room list` and `/room join <name>` navigate them.
 - Persistent per-room read positions with `/unread`, plus `/unread mentions` for mentions, replies, and private messages. `/room list` shows user counts, unread counts, and last activity; `/help <command>` provides localized usage, examples, and related commands.
+- Operators can run `/update` to migrate every legacy user record to the current on-disk format and gracefully restart the server. Migration failures cancel the restart.
 - Friendly multilingual captcha featuring easy comparisons and language-based name counts.
 - Expanded nickname support for non-Latin characters plus `/ban` upgrades that accept raw IP addresses alongside usernames.
 - `/weather <city>` for quick global forecasts.
