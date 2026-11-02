@@ -123,10 +123,20 @@ static unsigned int utf8_char_width(const char **p)
 
     if ((s[0] & 0xE0) == 0xC0) {
         byte_len = 2U;
-        display_cols = 1U;
     } else if ((s[0] & 0xF0) == 0xE0) {
         byte_len = 3U;
-        /* Decode code point to determine width */
+    } else if ((s[0] & 0xF8) == 0xF0) {
+        byte_len = 4U;
+    }
+
+    for (unsigned int i = 1U; i < byte_len; ++i) {
+        if (s[i] == '\0' || (s[i] & 0xC0) != 0x80) {
+            byte_len = i;
+            break;
+        }
+    }
+
+    if (byte_len == 3U) {
         unsigned int cp = ((unsigned int)(s[0] & 0x0F) << 12) |
                           ((unsigned int)(s[1] & 0x3F) << 6) |
                           (unsigned int)(s[2] & 0x3F);
@@ -142,23 +152,13 @@ static unsigned int utf8_char_width(const char **p)
             (cp >= 0xFFE0 && cp <= 0xFFE6)) {
             display_cols = 2U;
         }
-    } else if ((s[0] & 0xF8) == 0xF0) {
-        byte_len = 4U;
-        /* Most 4-byte characters (supplementary planes) including CJK ext. */
+    } else if (byte_len == 4U) {
         unsigned int cp = ((unsigned int)(s[0] & 0x07) << 18) |
                           ((unsigned int)(s[1] & 0x3F) << 12) |
                           ((unsigned int)(s[2] & 0x3F) << 6) |
                           (unsigned int)(s[3] & 0x3F);
         if (cp >= 0x20000 && cp <= 0x2FFFD) {
             display_cols = 2U;
-        }
-    }
-
-    /* Validate continuation bytes */
-    for (unsigned int i = 1U; i < byte_len && s[i] != '\0'; ++i) {
-        if ((s[i] & 0xC0) != 0x80) {
-            byte_len = i;
-            break;
         }
     }
 
