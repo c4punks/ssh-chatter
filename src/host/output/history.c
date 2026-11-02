@@ -462,7 +462,7 @@ static size_t session_scrollback_render_window_locked(
         session_output_buffer_flush(ctx);
         ctx->scrollback_capture_capacity = SSH_CHATTER_OUTPUT_BUFFER_SIZE;
         ctx->scrollback_capture =
-            (char *)sshc_gc_malloc(ctx->scrollback_capture_capacity);
+            ttak_abstract_alloc(ctx->scrollback_capture_capacity);
         ctx->scrollback_capture_length = 0U;
         ctx->scrollback_capture_overflowed = false;
         if (ctx->scrollback_capture == nullptr) {
@@ -489,24 +489,39 @@ static size_t session_scrollback_render_window_locked(
     }
     offsets[count] = ctx->scrollback_capture_length;
 
-    char *captured = ctx->scrollback_capture;
+    ttak_abstract_mem_t *captured = ctx->scrollback_capture;
+    const size_t captured_length = offsets[count];
     ctx->scrollback_capture = nullptr;
     ctx->scrollback_capture_length = 0U;
     ctx->scrollback_capture_capacity = 0U;
     if (captured == nullptr || ctx->scrollback_capture_overflowed) {
         /* The capture outgrew its cap and went out unmeasured (no header). */
         ctx->scrollback_capture_overflowed = false;
+        ttak_abstract_free(captured);
         if (ctx->display_model_initialized) {
             return ctx->display_model.line_count;
         }
         return count;
     }
 
+    ttak_abstract_map_t captured_view;
+    if (ttak_abstract_map(captured, 0U, captured_length,
+                          TTAK_ABSTRACT_ACCESS_READ, &captured_view) != 0) {
+        ttak_abstract_free(captured);
+        if (ctx->display_model_initialized) {
+            return ctx->display_model.line_count;
+        }
+        return count;
+    }
+    const char *captured_data = captured_view.data != nullptr
+                                    ? (const char *)captured_view.data
+                                    : "";
+
     size_t first = count;
     size_t entry_rows = 0U;
     while (first > 0U) {
         const size_t rows = session_scrollback_count_rows(
-            ctx, &captured[offsets[first - 1U]],
+            ctx, &captured_data[offsets[first - 1U]],
             offsets[first] - offsets[first - 1U]);
         /* The newest message always stays, even if it alone is too tall. */
         if (first < count && entry_rows + rows > max_rows) {
@@ -527,33 +542,42 @@ static size_t session_scrollback_render_window_locked(
 
     ctx->scrollback_capture_capacity = SSH_CHATTER_MESSAGE_LIMIT;
     ctx->scrollback_capture =
-        (char *)sshc_gc_malloc(ctx->scrollback_capture_capacity);
+        ttak_abstract_alloc(ctx->scrollback_capture_capacity);
     ctx->scrollback_capture_length = 0U;
     size_t header_rows = 1U;
     if (ctx->scrollback_capture != nullptr) {
         session_scrollback_send_header(ctx, history_indices[first],
                                        history_indices[last - 1U], total);
-        char *header = ctx->scrollback_capture;
+        ttak_abstract_mem_t *header = ctx->scrollback_capture;
         const size_t header_length = ctx->scrollback_capture_length;
         ctx->scrollback_capture = nullptr;
         ctx->scrollback_capture_length = 0U;
         ctx->scrollback_capture_capacity = 0U;
-        if (header != nullptr && !ctx->scrollback_capture_overflowed) {
-            header_rows =
-                session_scrollback_count_rows(ctx, header, header_length);
-            session_channel_write(ctx, header, header_length);
+        if (!ctx->scrollback_capture_overflowed) {
+            ttak_abstract_map_t header_view;
+            if (ttak_abstract_map(header, 0U, header_length,
+                                  TTAK_ABSTRACT_ACCESS_READ, &header_view) == 0) {
+                const char *header_data = header_view.data != nullptr
+                                              ? (const char *)header_view.data
+                                              : "";
+                header_rows = session_scrollback_count_rows(ctx, header_data,
+                                                            header_length);
+                session_channel_write(ctx, header_data, header_length);
+                ttak_abstract_unmap(&header_view);
+            }
         }
         ctx->scrollback_capture_overflowed = false;
-        sshc_gc_free(header);
+        ttak_abstract_free(header);
     } else {
         ctx->scrollback_capture_capacity = 0U;
         session_scrollback_send_header(ctx, history_indices[first],
                                        history_indices[last - 1U], total);
     }
 
-    session_channel_write(ctx, &captured[offsets[first]],
+    session_channel_write(ctx, &captured_data[offsets[first]],
                           offsets[count] - offsets[first]);
-    sshc_gc_free(captured);
+    ttak_abstract_unmap(&captured_view);
+    ttak_abstract_free(captured);
 
     *first_shown = history_indices[first];
     ctx->scrollback_rendered_entries = count - first;
