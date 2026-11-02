@@ -483,9 +483,12 @@ static bool session_render_incremental_lines(session_ctx_t *ctx,
             continue;
         }
 
-        size_t target_row =
-            (old_present && idx < old_offset_capacity) ? old_row_offsets[idx]
-                                                       : total_old_rows;
+        size_t target_row = total_new_rows;
+        if (old_present && idx < old_offset_capacity) {
+            target_row = old_row_offsets[idx];
+        } else if (new_present && idx < new_offset_capacity) {
+            target_row = new_row_offsets[idx];
+        }
         if (!cursor_positioned) {
             session_write_vertical_cursor_move(ctx, target_row, 'B');
             current_row = target_row;

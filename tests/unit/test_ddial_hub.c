@@ -1070,6 +1070,109 @@ TEST(scrollback_navigate_skips_noise_and_never_blanks)
     free(host);
 }
 
+TEST(scrollback_tail_append_scrolls_without_repeating_visible_entry)
+{
+    host_t *host = new_host();
+    CHECK(host != NULL);
+
+    int pipefd[2];
+    CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, pipefd), 0);
+
+    session_ctx_t ctx = {0};
+    ctx.transport_kind = SESSION_TRANSPORT_TELNET;
+    ctx.telnet_fd = pipefd[1];
+    ctx.owner = host;
+    ctx.terminal_width = 80;
+    ctx.terminal_height = 4;
+    CHECK(display_model_init(&ctx.display_model, 8));
+    ctx.display_model_initialized = true;
+
+    chat_history_entry_t entries[3] = {0};
+    const char *messages[] = {"first message", "second message", "third message"};
+    for (size_t idx = 0U; idx < 3U; ++idx) {
+        entries[idx].is_user_message = true;
+        snprintf(entries[idx].username, sizeof(entries[idx].username), "alice");
+        snprintf(entries[idx].message, sizeof(entries[idx].message), "%s",
+                 messages[idx]);
+        chat_history_entry_t stored = {0};
+        CHECK(host_history_commit_entry(host, &entries[idx], &stored));
+        entries[idx] = stored;
+    }
+
+    for (size_t idx = 0U; idx < 2U; ++idx) {
+        session_render_history_entry(&ctx, &entries[idx], false);
+    }
+    ctx.last_sink_history_total = 2U;
+    ctx.pending_should_sink = true;
+
+    session_process_pending_sink(&ctx);
+    session_channel_flush(&ctx);
+    close(pipefd[1]);
+
+    char output[16384];
+    size_t used = 0U;
+    for (;;) {
+        ssize_t n = read(pipefd[0], output + used, sizeof(output) - used - 1U);
+        if (n <= 0) {
+            break;
+        }
+        used += (size_t)n;
+        if (used + 1U >= sizeof(output)) {
+            break;
+        }
+    }
+    output[used] = '\0';
+
+    CHECK(strstr(output, "\033[1S") != NULL);
+    CHECK(strstr(output, "second message") == NULL);
+    CHECK(strstr(output, "third message") != NULL);
+
+    close(pipefd[0]);
+    display_model_destroy(&ctx.display_model);
+    free(host);
+}
+
+TEST(scrollback_growing_frame_positions_each_new_line)
+{
+    int sockfd[2];
+    CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sockfd), 0);
+
+    session_ctx_t ctx = {0};
+    ctx.transport_kind = SESSION_TRANSPORT_TELNET;
+    ctx.telnet_fd = sockfd[1];
+    ctx.terminal_width = 80;
+    ctx.terminal_height = 6;
+
+    const session_screen_line_t old_lines[] = {{"old", 3U}};
+    const session_screen_line_t new_lines[] = {
+        {"old", 3U}, {"second", 6U}, {"third", 5U}};
+    CHECK(session_render_incremental_lines(&ctx, old_lines, 1U, new_lines, 3U,
+                                           true));
+    session_channel_flush(&ctx);
+    close(sockfd[1]);
+
+    char output[4096];
+    size_t used = 0U;
+    for (;;) {
+        ssize_t n = read(sockfd[0], output + used, sizeof(output) - used - 1U);
+        if (n <= 0) {
+            break;
+        }
+        used += (size_t)n;
+    }
+    output[used] = '\0';
+
+    size_t down_moves = 0U;
+    for (char *cursor = output;
+         (cursor = strstr(cursor, "\033[1B")) != NULL; ++cursor) {
+        ++down_moves;
+    }
+    CHECK_EQ(down_moves, 3U);
+    CHECK(strstr(output, "second") != NULL);
+    CHECK(strstr(output, "third") != NULL);
+    close(sockfd[0]);
+}
+
 static void remove_dir_files(const char *dir)
 {
     char path[PATH_MAX];
@@ -1118,6 +1221,8 @@ int main(void)
     RUN_TEST(scrollback_entry_visibility_check);
     RUN_TEST(scrollback_skips_consecutive_noise_entries);
     RUN_TEST(scrollback_navigate_skips_noise_and_never_blanks);
+    RUN_TEST(scrollback_tail_append_scrolls_without_repeating_visible_entry);
+    RUN_TEST(scrollback_growing_frame_positions_each_new_line);
 
     remove_dir_files(g_dir);
     return TEST_REPORT();

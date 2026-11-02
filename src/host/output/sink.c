@@ -288,7 +288,7 @@ static void session_process_pending_sink_locked(session_ctx_t *ctx)
     size_t previous_count = 0U;
     const unsigned int viewport_height =
         (unsigned int)session_scrollback_line_capacity(ctx);
-    const bool try_incremental = false;
+    const bool try_incremental = ctx->display_model_initialized;
 
     if (try_incremental) {
         previous_count = session_capture_visible_display_lines(
@@ -359,13 +359,13 @@ static void session_process_pending_sink_locked(session_ctx_t *ctx)
                                       &current_frame);
         size_t current_count = session_describe_visible_frame(
             &current_frame, current_lines, SSH_CHATTER_SCROLLBACK_MAX_CHUNK);
-        display_model_release_visible(&current_frame);
         if (current_count > 0U) {
             ctx->output_buffer_length = buffer_mark;
             used_incremental_redraw = session_render_incremental_lines(
                 ctx, previous_lines, previous_count, current_lines, current_count,
                 true);
         }
+        display_model_release_visible(&current_frame);
     }
 
     if (!used_incremental_redraw) {
