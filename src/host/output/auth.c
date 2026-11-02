@@ -784,17 +784,203 @@ static bool session_is_captcha_exempt(const session_ctx_t *ctx)
     return strcmp(lowered, "gpt") == 0;
 }
 
-static void session_print_help(session_ctx_t *ctx)
+typedef struct session_help_detail {
+    const char *command;
+    const char *example;
+    const char *related;
+} session_help_detail_t;
+
+static const session_help_detail_t kSessionHelpDetails[] = {
+    {"help", "help reply", "advanced"},
+    {"advanced", "advanced", "help"},
+    {"ddial", "ddial status", "reply, thread"},
+    {"reply", "reply 6428b Thanks!", "thread, chat, unread"},
+    {"thread", "thread 6428b", "reply, chat"},
+    {"room", "room join UTF-8", "unread, multilingual-route"},
+    {"unread", "unread mentions", "room, reply, pm"},
+    {"multilingual-route", "multilingual-route on", "room, unread"},
+    {"pm", "pm alice|hello", "unread mentions, mail"},
+    {"mail", "mail read", "pm, unread mentions"},
+    {"chat", "chat 6428b", "reply, thread"},
+    {"search", "search alice", "users, chat"},
+    {"history", "history 10", "help"},
+    {"bbs", "bbs list", "asciiart"},
+    {"asciiart", "asciiart bbs sunset", "bbs"},
+};
+
+static bool session_help_query_matches(const char *query, const char *label)
+{
+    if (query == nullptr || label == nullptr) {
+        return false;
+    }
+    size_t length = 0U;
+    while (label[length] != '\0' && !isspace((unsigned char)label[length])) {
+        ++length;
+    }
+    return strlen(query) == length && strncasecmp(query, label, length) == 0;
+}
+
+static bool session_help_entry_matches(session_ctx_t *ctx,
+                                       const session_help_entry_t *entry,
+                                       const char *query)
+{
+    if (entry == nullptr || entry->kind != SESSION_HELP_ENTRY_COMMAND) {
+        return false;
+    }
+    if (session_help_query_matches(query, entry->label)) {
+        return true;
+    }
+    const size_t language = (size_t)session_ui_language_current(ctx);
+    if (language < SESSION_UI_LANGUAGE_COUNT &&
+        session_help_query_matches(query, entry->label_translations[language])) {
+        return true;
+    }
+
+    size_t command_length = 0U;
+    while (entry->label[command_length] != '\0' &&
+           !isspace((unsigned char)entry->label[command_length])) {
+        ++command_length;
+    }
+    char canonical[64];
+    if (command_length == 0U || command_length + 2U > sizeof(canonical)) {
+        return false;
+    }
+    canonical[0] = '/';
+    memcpy(canonical + 1U, entry->label, command_length);
+    canonical[command_length + 1U] = '\0';
+    const char *alias = session_command_alias_preferred_by_canonical(ctx, canonical);
+    if (alias != nullptr && alias[0] == '/') {
+        ++alias;
+    }
+    return alias != nullptr && strcasecmp(query, alias) == 0;
+}
+
+static const session_help_entry_t *session_help_find_in_entries(
+    session_ctx_t *ctx, const session_help_entry_t *entries, size_t count,
+    const char *query)
+{
+    for (size_t idx = 0U; idx < count; ++idx) {
+        if (session_help_entry_matches(ctx, &entries[idx], query)) {
+            return &entries[idx];
+        }
+    }
+    return nullptr;
+}
+
+static const session_help_entry_t *session_help_find(session_ctx_t *ctx,
+                                                     const char *query)
+{
+    const session_help_entry_t *entry = session_help_find_in_entries(
+        ctx, kSessionHelpEssential,
+        sizeof(kSessionHelpEssential) / sizeof(kSessionHelpEssential[0]), query);
+    if (entry == nullptr) {
+        entry = session_help_find_in_entries(
+            ctx, kSessionHelpExtended,
+            sizeof(kSessionHelpExtended) / sizeof(kSessionHelpExtended[0]), query);
+    }
+    if (entry == nullptr && ctx->user.is_operator) {
+        entry = session_help_find_in_entries(
+            ctx, kSessionHelpOperator,
+            sizeof(kSessionHelpOperator) / sizeof(kSessionHelpOperator[0]), query);
+    }
+    return entry;
+}
+
+static void session_print_command_help(session_ctx_t *ctx,
+                                       const session_help_entry_t *entry)
+{
+    const size_t language = (size_t)session_ui_language_current(ctx);
+    const char *label = entry->label;
+    if (language < SESSION_UI_LANGUAGE_COUNT &&
+        entry->label_translations[language] != nullptr &&
+        entry->label_translations[language][0] != '\0') {
+        label = entry->label_translations[language];
+    }
+    char usage[SSH_CHATTER_MESSAGE_LIMIT];
+    char prefixed_label[SSH_CHATTER_MESSAGE_LIMIT];
+    snprintf(prefixed_label, sizeof(prefixed_label), "%s%s",
+             session_command_prefix(ctx), label);
+    session_command_snprintf(ctx, usage, sizeof(usage), "Usage: %s",
+                             prefixed_label);
+    session_send_system_line(ctx, usage);
+
+    const char *format = entry->description[language];
+    if (format == nullptr) {
+        format = entry->description[SESSION_UI_LANGUAGE_EN];
+    }
+    const char *args[SESSION_HELP_TEMPLATE_ARG_LIMIT];
+    const size_t arg_count = session_help_collect_arguments(
+        ctx, entry->description_args, entry->description_arg_count, args,
+        sizeof(args) / sizeof(args[0]));
+    char description[SSH_CHATTER_MESSAGE_LIMIT];
+    session_format_template(format, args, arg_count, description,
+                            sizeof(description));
+    session_send_system_line(ctx, description);
+
+    for (size_t idx = 0U;
+         idx < sizeof(kSessionHelpDetails) / sizeof(kSessionHelpDetails[0]); ++idx) {
+        const session_help_detail_t *detail = &kSessionHelpDetails[idx];
+        if (!session_help_query_matches(detail->command, entry->label)) {
+            continue;
+        }
+        char example[SSH_CHATTER_MESSAGE_LIMIT];
+        char example_command[SSH_CHATTER_MESSAGE_LIMIT];
+        snprintf(example_command, sizeof(example_command), "%s%s",
+                 session_command_prefix(ctx), detail->example);
+        session_command_snprintf(ctx, example, sizeof(example), "Example: %s",
+                                 example_command);
+        session_send_system_line(ctx, example);
+        if (detail->related[0] != '\0') {
+            char related[SSH_CHATTER_MESSAGE_LIMIT];
+            session_command_snprintf(ctx, related, sizeof(related),
+                                     "Related commands: %s", detail->related);
+            session_send_system_line(ctx, related);
+        }
+        break;
+    }
+}
+
+static void session_print_help(session_ctx_t *ctx, const char *arguments)
 {
     if (ctx == nullptr) {
+        return;
+    }
+
+    char query[128];
+    snprintf(query, sizeof(query), "%s", arguments != nullptr ? arguments : "");
+    trim_whitespace_inplace(query);
+    if (query[0] != '\0') {
+        char *saveptr = nullptr;
+        char *command = strtok_r(query, " \t", &saveptr);
+        if (strtok_r(nullptr, " \t", &saveptr) != nullptr) {
+            session_send_system_line(
+                ctx, session_command_localize(ctx, "Usage: /help [command]"));
+            return;
+        }
+        const char *prefix = session_command_prefix(ctx);
+        const size_t prefix_length = strlen(prefix);
+        const char *lookup = command;
+        if (prefix_length > 0U && strncasecmp(lookup, prefix, prefix_length) == 0) {
+            lookup += prefix_length;
+        } else if (lookup[0] == '/') {
+            ++lookup;
+        }
+        const session_help_entry_t *entry = session_help_find(ctx, lookup);
+        if (entry == nullptr) {
+            char message[SSH_CHATTER_MESSAGE_LIMIT];
+            session_command_snprintf(ctx, message, sizeof(message),
+                                     "No help is available for '%s'.", command);
+            session_send_system_line(ctx, message);
+            return;
+        }
+        session_print_command_help(ctx, entry);
         return;
     }
 
     const session_ui_locale_t *locale = session_ui_get_locale(ctx);
     const char *prefix = session_command_prefix(ctx);
 
-    char help_buffer[SSH_CHATTER_MESSAGE_LIMIT *
-                     32]; // A large enough buffer for help messages
+    char help_buffer[SSH_CHATTER_MESSAGE_LIMIT * 32];
     help_buffer[0] = '\0';
 
     if (locale->help_title != nullptr && locale->help_title[0] != '\0') {

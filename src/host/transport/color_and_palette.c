@@ -1648,7 +1648,7 @@ static void session_handle_alpha_centauri_landers(session_ctx_t *ctx);
 static void session_format_help_entries_to_buffer(
     session_ctx_t *ctx, const session_help_entry_t *entries, size_t count,
     char *buffer, size_t buffer_length);
-static void session_print_help(session_ctx_t *ctx);
+static void session_print_help(session_ctx_t *ctx, const char *arguments);
 static void session_handle_set_ui_lang(session_ctx_t *ctx,
                                        const char *arguments);
 static bool session_line_is_exit_command(const char *line);

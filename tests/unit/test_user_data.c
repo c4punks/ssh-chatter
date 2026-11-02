@@ -313,6 +313,62 @@ TEST(load_rejects_corrupt_file)
     CHECK(!user_data_load(g_root, "mallory", NULL, &loaded));
 }
 
+TEST(read_cursors_and_unread_private_messages_round_trip)
+{
+    fresh_root();
+    user_data_record_t record;
+    CHECK(user_data_init(&record, "reader", "192.0.2.10"));
+    record.room_read_message_ids[1] = 42U;
+    record.mention_read_message_id = 43U;
+    record.reply_read_id = 44U;
+    record.unread_pm_count = 1U;
+    record.unread_pms[0].timestamp = 12345U;
+    snprintf(record.unread_pms[0].sender, sizeof(record.unread_pms[0].sender),
+             "%s", "alice");
+    snprintf(record.unread_pms[0].message, sizeof(record.unread_pms[0].message),
+             "%s", "private hello");
+    CHECK(user_data_save(g_root, &record, "192.0.2.10"));
+
+    user_data_record_t loaded;
+    CHECK(user_data_load(g_root, "reader", "192.0.2.10", &loaded));
+    CHECK_EQ(loaded.room_read_message_ids[1], 42U);
+    CHECK_EQ(loaded.mention_read_message_id, 43U);
+    CHECK_EQ(loaded.reply_read_id, 44U);
+    CHECK_EQ(loaded.unread_pm_count, 1U);
+    CHECK_STR_EQ(loaded.unread_pms[0].sender, "alice");
+    CHECK_STR_EQ(loaded.unread_pms[0].message, "private hello");
+}
+
+TEST(version_seven_records_keep_reserved_flags_when_upgraded)
+{
+    fresh_root();
+    CHECK(user_data_ensure_root(g_root));
+    user_data_record_t legacy;
+    CHECK(user_data_init(&legacy, "legacy", NULL));
+    legacy.version = 7U;
+    user_data_set_fixnick_enabled(&legacy, true);
+    user_data_set_password_hash_algorithm(&legacy, USER_DATA_HASH_LEGACY);
+
+    char path[PATH_MAX];
+    CHECK(user_data_path_for(g_root, "legacy", NULL, true, path, sizeof(path)));
+    FILE *fp = fopen(path, "wb");
+    CHECK(fp != NULL);
+    const size_t legacy_size = offsetof(user_data_record_t, room_read_message_ids);
+    CHECK_EQ(fwrite(&legacy, legacy_size, 1U, fp), 1U);
+    fclose(fp);
+
+    user_data_record_t loaded;
+    CHECK(user_data_load(g_root, "legacy", NULL, &loaded));
+    CHECK_EQ(loaded.version, 8U);
+    CHECK(user_data_reserved_nickname_is_ip_wide(&loaded));
+    CHECK(user_data_fixnick_enabled(&loaded));
+    CHECK_EQ(user_data_password_hash_algorithm(&loaded), USER_DATA_HASH_LEGACY);
+    CHECK_EQ(loaded.room_read_message_ids[0], 0U);
+    CHECK_EQ(loaded.mention_read_message_id, 0U);
+    CHECK_EQ(loaded.reply_read_id, 0U);
+    CHECK_EQ(loaded.unread_pm_count, 0U);
+}
+
 int main(void)
 {
     snprintf(g_root, sizeof(g_root), "/tmp/sshc-user-data-test-%ld",
@@ -333,6 +389,8 @@ int main(void)
     RUN_TEST(legacy_hash_verifies_and_reports_legacy);
     RUN_TEST(ssh_chat_server_config_round_trip);
     RUN_TEST(save_then_load_round_trips_fields);
+    RUN_TEST(read_cursors_and_unread_private_messages_round_trip);
+    RUN_TEST(version_seven_records_keep_reserved_flags_when_upgraded);
     RUN_TEST(load_missing_user_fails);
     RUN_TEST(ensure_exists_creates_then_reuses_record);
     RUN_TEST(path_for_stays_inside_root);

@@ -134,6 +134,12 @@ bool session_detect_provider_ip(const char *ip, char *label, size_t length);
 #include "ssh_chatter/humanized/humanized.h"
 
 bool session_game_othello_handle_forced_exit(session_ctx_t *ctx);
+void session_unread_note_entry(session_ctx_t *ctx,
+                               const chat_history_entry_t *entry);
+void session_unread_persist(session_ctx_t *ctx);
+void session_unread_announce(session_ctx_t *ctx);
+void session_unread_record_private(session_ctx_t *recipient,
+                                   const char *sender, const char *message);
 bool host_json_api_listener_start(host_t *host, const char *bind_addr,
                                   const char *port);
 void host_json_api_listener_stop(host_t *host);

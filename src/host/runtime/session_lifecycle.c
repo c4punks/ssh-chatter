@@ -277,6 +277,7 @@ static void session_destroy(session_ctx_t *ctx)
         return;
     }
 
+    session_unread_persist(ctx);
     session_runtime_unbind(ctx);
     session_detach_external_state(ctx);
     session_drain_reclamation(ctx->memory_context, ctx->owner);
@@ -1105,6 +1106,7 @@ static void *session_thread(void *arg)
         }
         chat_room_add(&ctx->owner->room, ctx);
         ctx->has_joined_room = true;
+        session_unread_announce(ctx);
         printf("[join] %s\n", ctx->user.name);
 
         host_ddial_notify_admin_if_port_adjusted(ctx->owner, ctx);

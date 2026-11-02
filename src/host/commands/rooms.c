@@ -69,23 +69,7 @@ static void session_handle_room(session_ctx_t *ctx, const char *arguments)
     char *saveptr = nullptr;
     char *action = strtok_r(working, " \t", &saveptr);
     if (action != nullptr && strcasecmp(action, "list") == 0) {
-        char listing[1024] = "main";
-        size_t used = strlen(listing);
-        for (uint8_t room_id = CHAT_ROOM_UTF8; room_id <= CHAT_ROOM_MAX_ID;
-             ++room_id) {
-            const char *name = session_chat_room_name(room_id);
-            if (name == nullptr || !session_chat_room_exists(ctx->owner, room_id)) {
-                continue;
-            }
-            int n = snprintf(listing + used, sizeof(listing) - used, "\n%s", name);
-            if (n < 0 || (size_t)n >= sizeof(listing) - used) {
-                break;
-            }
-            used += (size_t)n;
-        }
-        session_send_system_line(
-            ctx, session_command_localize(ctx, "Available rooms:"));
-        session_send_system_line(ctx, listing);
+        session_unread_print_rooms(ctx);
         return;
     }
 
@@ -111,17 +95,19 @@ static void session_handle_room(session_ctx_t *ctx, const char *arguments)
             return;
         }
 
+        session_unread_persist(ctx);
         atomic_store(&ctx->current_room, room_id);
         session_clear_screen(ctx);
         session_scrollback_reset_position(ctx);
         session_apply_background_fill(ctx);
-        session_flag_should_sink(ctx);
-        session_process_pending_sink(ctx);
         const char *canonical = session_chat_room_name(room_id);
         char line[SSH_CHATTER_MESSAGE_LIMIT];
         session_command_snprintf(ctx, line, sizeof(line), "Joined room %s.",
                                  canonical);
         session_send_system_line(ctx, line);
+        session_unread_announce(ctx);
+        session_flag_should_sink(ctx);
+        session_process_pending_sink(ctx);
         session_refresh_input_line(ctx);
         return;
     }

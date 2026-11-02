@@ -1357,6 +1357,7 @@ static void session_deliver_outgoing_message(session_ctx_t *ctx,
         char line[SSH_CHATTER_MESSAGE_LIMIT * 2U];
         chat_history_entry_format_user_line(&entry, line, sizeof(line), true);
         session_send_plain_line(ctx, line);
+        session_unread_note_entry(ctx, &entry);
 
         if (entry.attachment_type != CHAT_ATTACHMENT_NONE &&
             entry.attachment_target[0] != '\0') {

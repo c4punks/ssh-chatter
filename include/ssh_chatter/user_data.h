@@ -35,6 +35,19 @@
 #define USER_DATA_FLAG_HISTORY_LIMIT 16U
 #endif
 
+/* Chat read cursors cover main plus every encoding room in host.h. */
+#ifndef USER_DATA_ROOM_LIMIT
+#define USER_DATA_ROOM_LIMIT 9U
+#endif
+
+/* Private messages waiting for /unread mentions. */
+#ifndef USER_DATA_UNREAD_PM_LIMIT
+#define USER_DATA_UNREAD_PM_LIMIT 16U
+#endif
+#ifndef USER_DATA_UNREAD_PM_MESSAGE_LEN
+#define USER_DATA_UNREAD_PM_MESSAGE_LEN 1024U
+#endif
+
 /* These sizes are owned by host.h, which must be included first. */
 #ifndef SSH_CHATTER_USERNAME_LEN
 #error "SSH_CHATTER_USERNAME_LEN must be defined before including user_data.h"
@@ -74,6 +87,12 @@ typedef struct alpha_centauri_save {
     double radiation_msv;
 } alpha_centauri_save_t;
 
+typedef struct user_data_unread_pm_entry {
+    uint64_t timestamp;
+    char sender[SSH_CHATTER_USERNAME_LEN];
+    char message[USER_DATA_UNREAD_PM_MESSAGE_LEN];
+} user_data_unread_pm_entry_t;
+
 /* Complete persisted profile of one user (also the on-disk layout). */
 typedef struct user_data_record {
     uint32_t magic;   /* File signature, checked on load */
@@ -107,6 +126,11 @@ typedef struct user_data_record {
      *   [2] password hash algorithm (USER_DATA_HASH_*)
      */
     uint8_t reserved[16];
+    uint64_t room_read_message_ids[USER_DATA_ROOM_LIMIT];
+    uint64_t mention_read_message_id;
+    uint64_t reply_read_id;
+    uint32_t unread_pm_count;
+    user_data_unread_pm_entry_t unread_pms[USER_DATA_UNREAD_PM_LIMIT];
 } user_data_record_t;
 
 /* Values of reserved[2]: which hash produced password_hash. */

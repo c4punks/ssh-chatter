@@ -519,17 +519,17 @@ static const size_t kSessionBbsSubcommandCount =
 static const session_help_entry_t kSessionHelpEssential[] = {
     {
         .kind = SESSION_HELP_ENTRY_COMMAND,
-        .label = "help",
+        .label = "help [command]",
         .description =
             {
-                "Show essential chat and BBS commands.",
-                "채팅과 게시판에 필요한 핵심 명령을 보여줍니다.",
-                "チャットと掲示板で必要な基本コマンドを表示します。",
-                "显示聊天与公告板所需的核心命令。",
-                "Показать основные команды для чата и доски объявлений.",
-                "Grundlegende Chat- und BBS-Befehle anzeigen.",
-                "Afficher les commandes essentielles du chat et du BBS.",
-                "Pokaż podstawowe polecenia czatu i BBS.",
+                "Show essential commands or detailed help for one command.",
+                "핵심 명령 또는 특정 명령의 자세한 도움말을 보여줍니다.",
+                "基本コマンド一覧または指定したコマンドの詳細を表示します。",
+                "显示核心命令或指定命令的详细帮助。",
+                "Показать основные команды или подробную справку по одной команде.",
+                "Wichtige Befehle oder Details zu einem Befehl anzeigen.",
+                "Afficher les commandes essentielles ou l'aide détaillée d'une commande.",
+                "Pokaż podstawowe polecenia lub szczegółową pomoc dla jednego polecenia.",
             },
     },
     {
@@ -661,6 +661,29 @@ static const session_help_entry_t kSessionHelpEssential[] = {
                 "CP852.",
                 "Pokaż bieżący lub utworzone pokoje kodowania albo dołącz do "
                 "main, UTF-8, CP949, CP932, CP936, CP1251, CP850 lub CP852.",
+            },
+    },
+    {
+        .kind = SESSION_HELP_ENTRY_COMMAND,
+        .label = "unread [mentions]",
+        .description =
+            {
+                "Show unread messages in this room, or mentions, replies, and "
+                "private messages from every room. Read positions are saved.",
+                "현재 방의 읽지 않은 메시지 또는 모든 방의 멘션·답장·귓속말을 "
+                "보여줍니다. 읽은 위치는 저장됩니다.",
+                "このルームの未読メッセージ、または全ルームのメンション・返信・"
+                "プライベートメッセージを表示します。読了位置は保存されます。",
+                "显示此房间的未读消息，或所有房间的提及、回复和私信。阅读位置会保存。",
+                "Показать непрочитанные сообщения комнаты или упоминания, ответы "
+                "и личные сообщения из всех комнат. Позиция чтения сохраняется.",
+                "Ungelesenes in diesem Raum oder Erwähnungen, Antworten und "
+                "private Nachrichten aus allen Räumen anzeigen. Lesepositionen "
+                "werden gespeichert.",
+                "Afficher les messages non lus du salon ou les mentions, réponses "
+                "et messages privés de tous les salons. La position est enregistrée.",
+                "Pokaż nieprzeczytane wiadomości w pokoju lub wzmianki, odpowiedzi "
+                "i prywatne wiadomości ze wszystkich pokoi. Pozycja jest zapisywana.",
             },
     },
     {

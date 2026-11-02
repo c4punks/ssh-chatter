@@ -66,7 +66,7 @@ static void session_dispatch_command(session_ctx_t *ctx, const char *line)
     }
 
     if (session_parse_command_any(ctx, "/help", effective_line, &args)) {
-        session_print_help(ctx);
+        session_print_help(ctx, args);
         return;
     }
 
@@ -288,6 +288,11 @@ static void session_dispatch_command(session_ctx_t *ctx, const char *line)
 
     else if (session_parse_command_any(ctx, "/room", effective_line, &args)) {
         session_handle_room(ctx, args);
+        return;
+    }
+
+    else if (session_parse_command_any(ctx, "/unread", effective_line, &args)) {
+        session_handle_unread(ctx, args);
         return;
     }
 

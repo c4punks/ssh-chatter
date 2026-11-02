@@ -1600,6 +1600,9 @@ static void session_translation_flush_ready(session_ctx_t *ctx)
             }
 
             if (target != nullptr) {
+                session_unread_record_private(
+                    target, ctx->user.name,
+                    ready->success ? ready->translated : ready->original);
                 chat_room_release_user_ref(target);
             }
             refreshed = true;

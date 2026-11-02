@@ -1022,6 +1022,7 @@ static void session_handle_pm(session_ctx_t *ctx, const char *arguments)
 
     session_send_private_message_line(target, ctx, to_target_label,
                                       deliver_body);
+    session_unread_record_private(target, ctx->user.name, deliver_body);
     session_send_private_message_line(ctx, ctx, to_sender_label, deliver_body);
     chat_room_release_user_ref(target);
 }

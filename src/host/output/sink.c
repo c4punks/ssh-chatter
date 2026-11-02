@@ -392,6 +392,13 @@ static void session_process_pending_sink_locked(session_ctx_t *ctx)
     }
 
     ctx->capture_realtime_output = prev_capture;
+    if (!ctx->should_exit) {
+        for (size_t idx = 0U; idx < copied; ++idx) {
+            if (!session_should_hide_entry(ctx, &buffer[idx])) {
+                session_unread_note_entry(ctx, &buffer[idx]);
+            }
+        }
+    }
     // Reset the realtime line counter so the next batch of live messages
     // does not immediately trigger session_realtime_refresh.
     ctx->realtime_line_count = 0U;

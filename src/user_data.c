@@ -28,7 +28,7 @@
 #include <unistd.h>
 
 #define USER_DATA_MAGIC 0x4D424F58U /* 'MBOX' */
-#define USER_DATA_VERSION 7U
+#define USER_DATA_VERSION 8U
 
 #define USER_DATA_PROFILE_DIRECTORY "profiles"
 #define USER_DATA_VARIANT_LIMIT 32U
@@ -931,6 +931,14 @@ static void user_data_normalize_record(user_data_record_t *record,
     }
     if (record->flag_history_count > USER_DATA_FLAG_HISTORY_LIMIT) {
         record->flag_history_count = USER_DATA_FLAG_HISTORY_LIMIT;
+    }
+    if (record->unread_pm_count > USER_DATA_UNREAD_PM_LIMIT) {
+        record->unread_pm_count = USER_DATA_UNREAD_PM_LIMIT;
+    }
+    for (size_t idx = 0U; idx < USER_DATA_UNREAD_PM_LIMIT; ++idx) {
+        record->unread_pms[idx].sender[SSH_CHATTER_USERNAME_LEN - 1U] = '\0';
+        record->unread_pms[idx]
+            .message[USER_DATA_UNREAD_PM_MESSAGE_LEN - 1U] = '\0';
     }
     record->has_user_theme = record->has_user_theme ? 1U : 0U;
     record->user_is_bold = record->user_is_bold ? 1U : 0U;
