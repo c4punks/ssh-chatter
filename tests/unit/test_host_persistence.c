@@ -302,6 +302,33 @@ TEST(login_is_password_command_masking)
     CHECK(!session_is_password_command("/signupp"));
 }
 
+TEST(scrollback_capture_overflow_flushes_without_large_copy)
+{
+    int sockfd[2];
+    CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sockfd), 0);
+
+    session_ctx_t ctx = {0};
+    ctx.transport_kind = SESSION_TRANSPORT_TELNET;
+    ctx.telnet_fd = sockfd[1];
+    ctx.scrollback_capture_capacity = 16U;
+    ctx.scrollback_capture = ttak_abstract_alloc(16U);
+    CHECK(ctx.scrollback_capture != NULL);
+
+    CHECK(session_scrollback_capture_append(&ctx, "abc", 3U));
+    CHECK(!session_scrollback_capture_append(&ctx, "x", SIZE_MAX));
+    CHECK(ctx.scrollback_capture == NULL);
+    CHECK_EQ(ctx.scrollback_capture_length, 0U);
+    CHECK_EQ(ctx.scrollback_capture_capacity, 0U);
+    CHECK(ctx.scrollback_capture_overflowed);
+
+    close(sockfd[1]);
+    char output[16];
+    ssize_t received = read(sockfd[0], output, sizeof(output));
+    CHECK_EQ(received, 3);
+    CHECK_MEM_EQ(output, "abc", 3U);
+    close(sockfd[0]);
+}
+
 int main(void)
 {
     snprintf(g_dir, sizeof(g_dir), "/tmp/sshc-persistence-test-%ld",
@@ -315,6 +342,7 @@ int main(void)
     RUN_TEST(bbs_threads_round_trip);
     RUN_TEST(bbs_threads_follow_shifted_comments);
     RUN_TEST(login_is_password_command_masking);
+    RUN_TEST(scrollback_capture_overflow_flushes_without_large_copy);
 
     rmdir(g_dir);
     return TEST_REPORT();

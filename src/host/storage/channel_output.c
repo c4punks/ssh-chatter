@@ -674,7 +674,7 @@ static void session_output_buffer_flush(session_ctx_t *ctx)
         // Temporarily disable buffering to avoid infinite recursion.  The
         // buffer holds output from before any scrollback capture began, so
         // it goes straight out rather than into the capture.
-        char *capture = ctx->scrollback_capture;
+        ttak_abstract_mem_t *capture = ctx->scrollback_capture;
         ctx->scrollback_capture = nullptr;
         ctx->output_buffering_enabled = false;
         session_channel_write(ctx, ctx->output_buffer,

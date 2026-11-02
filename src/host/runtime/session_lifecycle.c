@@ -222,6 +222,10 @@ static void session_cleanup(session_ctx_t *ctx)
     session_game_release_saved_gonu(ctx);
     session_safe_free((void **)&ctx->scrollback_buffer);
     ctx->scrollback_buffer_capacity = 0U;
+    ttak_abstract_free(ctx->scrollback_capture);
+    ctx->scrollback_capture = nullptr;
+    ctx->scrollback_capture_length = 0U;
+    ctx->scrollback_capture_capacity = 0U;
     session_release_interaction_state(ctx);
 }
 

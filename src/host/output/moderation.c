@@ -1144,36 +1144,52 @@ static void session_handle_search(session_ctx_t *ctx, const char *arguments)
 static bool session_scrollback_capture_append(session_ctx_t *ctx,
                                               const void *data, size_t length)
 {
-    const size_t needed = ctx->scrollback_capture_length + length;
-    if (needed > ctx->scrollback_capture_capacity) {
-        size_t capacity = ctx->scrollback_capture_capacity * 2U;
-        if (capacity < needed) {
-            capacity = needed;
+    bool failed = ctx->scrollback_capture_length > SESSION_SCROLLBACK_CAPTURE_MAX ||
+                  length > SESSION_SCROLLBACK_CAPTURE_MAX -
+                               ctx->scrollback_capture_length;
+    size_t needed = failed ? 0U : ctx->scrollback_capture_length + length;
+    size_t capacity = ctx->scrollback_capture_capacity;
+    if (!failed && needed > capacity) {
+        if (capacity == 0U) {
+            capacity = SSH_CHATTER_MESSAGE_LIMIT;
         }
-        char *grown = nullptr;
-        if (capacity <= SESSION_SCROLLBACK_CAPTURE_MAX) {
-            grown = (char *)sshc_gc_realloc(ctx->scrollback_capture, capacity);
-        }
-        if (grown == nullptr) {
-            char *captured = ctx->scrollback_capture;
-            const size_t captured_length = ctx->scrollback_capture_length;
-            ctx->scrollback_capture = nullptr;
-            ctx->scrollback_capture_length = 0U;
-            ctx->scrollback_capture_capacity = 0U;
-            ctx->scrollback_capture_overflowed = true;
-            if (captured_length > 0U) {
-                session_channel_write(ctx, captured, captured_length);
+        while (capacity < needed && capacity < SESSION_SCROLLBACK_CAPTURE_MAX) {
+            if (capacity > SESSION_SCROLLBACK_CAPTURE_MAX / 2U) {
+                capacity = SESSION_SCROLLBACK_CAPTURE_MAX;
+            } else {
+                capacity *= 2U;
             }
-            sshc_gc_free(captured);
-            return false;
         }
-        ctx->scrollback_capture = grown;
-        ctx->scrollback_capture_capacity = capacity;
+        failed = capacity < needed ||
+                 ttak_abstract_resize(ctx->scrollback_capture, capacity) != 0;
     }
-    memcpy(ctx->scrollback_capture + ctx->scrollback_capture_length, data,
-           length);
-    ctx->scrollback_capture_length = needed;
-    return true;
+    if (!failed) {
+        failed = ttak_abstract_write(ctx->scrollback_capture,
+                                     ctx->scrollback_capture_length, data,
+                                     length) != 0;
+    }
+    if (!failed) {
+        ctx->scrollback_capture_capacity = capacity;
+        ctx->scrollback_capture_length = needed;
+        return true;
+    }
+
+    ttak_abstract_mem_t *captured = ctx->scrollback_capture;
+    const size_t captured_length = ctx->scrollback_capture_length;
+    ctx->scrollback_capture = nullptr;
+    ctx->scrollback_capture_length = 0U;
+    ctx->scrollback_capture_capacity = 0U;
+    ctx->scrollback_capture_overflowed = true;
+    if (captured_length > 0U) {
+        ttak_abstract_map_t view;
+        if (ttak_abstract_map(captured, 0U, captured_length,
+                              TTAK_ABSTRACT_ACCESS_READ, &view) == 0) {
+            session_channel_write(ctx, view.data, captured_length);
+            ttak_abstract_unmap(&view);
+        }
+    }
+    ttak_abstract_free(captured);
+    return false;
 }
 
 void session_channel_write(session_ctx_t *ctx, const void *data, size_t length)

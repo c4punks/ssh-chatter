@@ -973,7 +973,7 @@ typedef struct session_ctx {
     size_t scrollback_rendered_entries;
     /* While set, session_channel_write() appends here instead of sending,
      * so a scrollback frame can be measured before it goes out. */
-    char *scrollback_capture;
+    ttak_abstract_mem_t *scrollback_capture;
     size_t scrollback_capture_length;
     size_t scrollback_capture_capacity;
     bool scrollback_capture_overflowed;
