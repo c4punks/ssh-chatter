@@ -550,6 +550,33 @@ static void test_burst_replay(void)
     ++g_tests_passed;
 }
 
+static void test_wrap_truncated_utf8_stays_in_bounds(void)
+{
+    const unsigned char prefix[] = {0xF0U, 0x9FU, 0x92U};
+    for (size_t length = 1U; length <= sizeof(prefix); ++length) {
+        char *text = malloc(length + 1U);
+        TEST_ASSERT(text != NULL, "allocate exact truncated UTF-8 buffer");
+        memcpy(text, prefix, length);
+        text[length] = '\0';
+
+        display_line_t out[4];
+        size_t produced = display_model_wrap_line(text, 80, 77, out, 4);
+        free(text);
+        TEST_ASSERT_EQ(produced, 1U, "truncated UTF-8 should produce one line");
+    }
+    ++g_tests_passed;
+}
+
+static void test_wrap_invalid_utf8_continuation(void)
+{
+    const char text[] = "\xE2" "A\xA2";
+    display_line_t out[4];
+    size_t produced = display_model_wrap_line(text, 80, 78, out, 4);
+    TEST_ASSERT_EQ(produced, 1U, "invalid continuation should not loop");
+    TEST_ASSERT_EQ(out[0].message_id, 78U, "message id should survive invalid input");
+    ++g_tests_passed;
+}
+
 /* ---- Main ---- */
 
 int main(void)
@@ -573,6 +600,8 @@ int main(void)
     test_empty_model();
     test_long_wrap_content_preserved();
     test_burst_replay();
+    test_wrap_truncated_utf8_stays_in_bounds();
+    test_wrap_invalid_utf8_continuation();
 
     printf("\n%d passed, %d failed\n", g_tests_passed, g_tests_failed);
 
