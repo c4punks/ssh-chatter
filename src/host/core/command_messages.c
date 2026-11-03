@@ -1866,7 +1866,7 @@ static const session_command_message_t kSessionCommandMessages[] = {
     {
         "Message routed to %s. Use /room join %s to follow that room.",
         {
-            [SESSION_UI_LANGUAGE_KO] = "메시지를 %s 방으로 별냈습니다. /room join %s 명령으로 그 방에 참여하세요.",
+            [SESSION_UI_LANGUAGE_KO] = "메시지를 %s 방으로 보냈습니다. /room join %s 명령으로 그 방에 참여하세요.",
             [SESSION_UI_LANGUAGE_JP] = "メッセージを %s に転送しました。/room join %s でそのルームに参加してください。",
             [SESSION_UI_LANGUAGE_ZH] = "消息已转发到 %s。使用 /room join %s 加入该房间。",
             [SESSION_UI_LANGUAGE_RU] = "Сообщение перенаправлено в %s. Войдите командой /room join %s.",
